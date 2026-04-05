@@ -1,4 +1,4 @@
-import { Plugin, ItemView, WorkspaceLeaf, App, TFile, setIcon, SuggestModal, Modal, Menu, addIcon } from "obsidian";
+import { Plugin, ItemView, WorkspaceLeaf, App, TFile, setIcon, SuggestModal, Modal, Menu, addIcon, Setting, PluginSettingTab, Notice } from "obsidian";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import type { ChildProcess } from "child_process";
@@ -770,6 +770,11 @@ class TerminalSession {
         MC_TERM_COLS: "80",
         MC_TERM_ROWS: "24",
       },
+    });
+
+    this.process.on("error", (err: Error) => {
+      console.error("[modular-context] Failed to spawn python3:", err);
+      this.terminal.write("\r\n\x1b[31m[Error] python3 not found. Install Python 3 to use the terminal.\x1b[0m\r\n");
     });
 
     // Wiki-link autocomplete
@@ -1701,7 +1706,8 @@ class TerminalView extends ItemView {
 
     // Sidebar (right): dashboard + standby + working + to review
     this.sidebarEl = container.createDiv({ cls: "mc-terminal-sidebar" });
-    this.loadCustomSkills().then(() => this.buildSidebar());
+    await this.loadCustomSkills();
+    this.buildSidebar();
 
     // Hidden tab bar (still needed for fullscreen manager compatibility)
     this.tabBarEl = document.createElement("div");
@@ -1746,7 +1752,7 @@ class TerminalView extends ItemView {
     }, 5000);
   }
 
-  private buildSidebar() {
+  buildSidebar() {
     this.sidebarEl.empty();
 
     // --- Toolbar (info icon) ---
@@ -1758,10 +1764,12 @@ class TerminalView extends ItemView {
 
     // --- Dashboard section ---
     const dashSection = this.sidebarEl.createDiv({ cls: "mc-sidebar-section" });
-    dashSection.createDiv({ cls: "mc-sidebar-section-header", text: "Dashboard" });
+    dashSection.createDiv({ cls: "mc-sidebar-section-header", text: "Skills" });
 
-    // Primary skills (no subtext — tooltip instead)
-    for (const skill of SKILLS.filter((s) => s.primary)) {
+    const allSkills = this.getVisibleSkills();
+    const primarySkills = allSkills.filter((s: any) => s.primary);
+    const secondarySkills = allSkills.filter((s: any) => !s.primary);
+    for (const skill of primarySkills) {
       const btn = dashSection.createDiv({ cls: "mc-sidebar-skill-btn is-primary" });
       btn.title = skill.description;
       const btnIcon = btn.createDiv({ cls: "mc-sidebar-skill-icon" });
@@ -1769,42 +1777,49 @@ class TerminalView extends ItemView {
       const btnText = btn.createDiv({ cls: "mc-sidebar-skill-text" });
       btnText.createDiv({ cls: "mc-sidebar-skill-label", text: skill.label });
       btn.addEventListener("click", () => this.launchSkill(skill));
+      btn.addEventListener("contextmenu", (e: MouseEvent) => this.showSkillMenu(e, skill));
     }
-
-    // Secondary skills (compact grid)
     const secondaryGrid = dashSection.createDiv({ cls: "mc-sidebar-skill-grid" });
-    const allSecondary = [...SKILLS.filter((s) => !s.primary), ...this.customSkills];
-    for (const skill of allSecondary) {
+    for (const skill of secondarySkills) {
       const btn = secondaryGrid.createDiv({ cls: "mc-sidebar-skill-btn is-secondary" });
       const btnIcon = btn.createDiv({ cls: "mc-sidebar-skill-icon" });
       setIcon(btnIcon, this.getSkillIcon(skill.id));
       btn.createSpan({ cls: "mc-sidebar-skill-label", text: skill.label });
       btn.addEventListener("click", () => this.launchSkill(skill));
-
-      // Right-click to remove custom skills
-      const isCustom = this.customSkills.some((s) => s.id === skill.id);
-      if (isCustom) {
-        btn.addEventListener("contextmenu", (e) => {
-          e.preventDefault();
-          const menu = new Menu();
-          menu.addItem((item) =>
-            item.setTitle("Remove").setIcon("trash-2").onClick(() => {
-              this.customSkills = this.customSkills.filter((s) => s.id !== skill.id);
-              this.saveCustomSkills();
-              this.buildSidebar();
-            })
-          );
-          menu.showAtMouseEvent(e);
-        });
-      }
+      btn.addEventListener("contextmenu", (e: MouseEvent) => this.showSkillMenu(e, skill));
     }
-
-    // [+] Add custom skill
     const addBtn = secondaryGrid.createDiv({ cls: "mc-sidebar-skill-btn is-secondary mc-sidebar-add-skill" });
     addBtn.createSpan({ text: "+" });
     addBtn.addEventListener("click", () => {
       this.showAddSkillInput(secondaryGrid, addBtn);
     });
+    const hiddenIds = (this as any).hiddenSkills ?? [];
+    if (hiddenIds.length > 0) {
+      const hiddenToggle = dashSection.createDiv({ cls: "mc-sidebar-hidden-toggle" });
+      hiddenToggle.createSpan({ text: `show ${hiddenIds.length} hidden` });
+      let expanded = false;
+      const hiddenList = dashSection.createDiv({ cls: "mc-sidebar-hidden-list" });
+      hiddenList.style.display = "none";
+      hiddenToggle.addEventListener("click", () => {
+        expanded = !expanded;
+        hiddenList.style.display = expanded ? "" : "none";
+        (hiddenToggle.querySelector("span") as HTMLElement).textContent = expanded ? `hide ${hiddenIds.length} hidden` : `show ${hiddenIds.length} hidden`;
+      });
+      for (const id of hiddenIds) {
+        const def = SKILLS.find((s) => s.id === id);
+        const cust = this.customSkills.find((s) => s.id === id);
+        const label = def?.label ?? cust?.label ?? id;
+        const row = hiddenList.createDiv({ cls: "mc-sidebar-hidden-row" });
+        row.createSpan({ text: label, cls: "mc-sidebar-hidden-name" });
+        const restoreLink = row.createSpan({ text: "restore", cls: "mc-sidebar-hidden-restore" });
+        restoreLink.addEventListener("click", (e: MouseEvent) => {
+          e.stopPropagation();
+          (this as any).hiddenSkills = (this as any).hiddenSkills.filter((h: string) => h !== id);
+          this.saveCustomSkills();
+          this.buildSidebar();
+        });
+      }
+    }
 
     // Auto-mode checkbox
     const autoRow = dashSection.createDiv({ cls: "mc-sidebar-auto-mode" });
@@ -1812,6 +1827,7 @@ class TerminalView extends ItemView {
     checkbox.checked = this.autoMode;
     checkbox.addEventListener("change", () => {
       this.autoMode = checkbox.checked;
+      this.saveCustomSkills();
     });
     autoRow.createSpan({ text: "Auto-mode", cls: "mc-sidebar-auto-label" });
 
@@ -1927,21 +1943,120 @@ class TerminalView extends ItemView {
   }
 
   private async saveCustomSkills() {
-    // Save via plugin data — access plugin through app
-    const pluginData = await (this.app as any).plugins?.plugins?.["modular-context"]?.loadData() ?? {};
+    const src = (this as any).plugin ?? (this.app as any).plugins?.plugins?.["modular-context"];
+    if (!src) return;
+    const pluginData = await src.loadData() ?? {};
     pluginData.customSkills = this.customSkills;
-    await (this.app as any).plugins?.plugins?.["modular-context"]?.saveData(pluginData);
+    pluginData.hiddenSkills = (this as any).hiddenSkills ?? [];
+    pluginData.skillConfig = (this as any).skillConfig ?? {};
+    pluginData.autoMode = this.autoMode ?? false;
+    pluginData.layout = this.inlineLayout ?? "single";
+    await src.saveData(pluginData);
   }
 
   async loadCustomSkills() {
-    const pluginData = await (this.app as any).plugins?.plugins?.["modular-context"]?.loadData() ?? {};
+    const src = (this as any).plugin ?? (this.app as any).plugins?.plugins?.["modular-context"];
+    if (!src) return;
+    const pluginData = await src.loadData() ?? {};
     this.customSkills = pluginData.customSkills ?? [];
+    (this as any).hiddenSkills = pluginData.hiddenSkills ?? [];
+    (this as any).skillConfig = pluginData.skillConfig ?? {};
+    this.autoMode = pluginData.autoMode ?? false;
+    this.inlineLayout = pluginData.layout ?? "single";
+    (this as any).maxSessions = pluginData.maxSessions ?? 8;
+  }
+
+  private getVisibleSkills(): any[] {
+    const hidden = new Set((this as any).hiddenSkills ?? []);
+    const cfg = (this as any).skillConfig ?? {};
+    const builtIn = SKILLS.filter((s) => !hidden.has(s.id)).map((s) => ({ ...s, ...(cfg[s.id] ?? {}), builtIn: true }));
+    const custom = (this.customSkills ?? []).filter((s) => !hidden.has(s.id)).map((s) => ({ ...s, builtIn: false }));
+    return [...builtIn, ...custom];
+  }
+
+  private showSkillMenu(e: MouseEvent, skill: any) {
+    e.preventDefault();
+    const menu = new Menu();
+    menu.addItem((item) => item.setTitle("Edit").setIcon("pencil").onClick(() => this.showSkillEditModal(skill)));
+    menu.addItem((item) => item
+      .setTitle(skill.primary ? "Move to secondary" : "Move to primary")
+      .setIcon(skill.primary ? "arrow-down" : "arrow-up")
+      .onClick(() => {
+        if (skill.builtIn) {
+          const cfg = (this as any).skillConfig;
+          cfg[skill.id] = { ...(cfg[skill.id] ?? {}), primary: !skill.primary };
+        } else {
+          const cs = this.customSkills.find((s) => s.id === skill.id);
+          if (cs) (cs as any).primary = !(cs as any).primary;
+        }
+        this.saveCustomSkills();
+        this.buildSidebar();
+      })
+    );
+    menu.addItem((item) => item.setTitle("Hide").setIcon("eye-off").onClick(() => {
+      (this as any).hiddenSkills = [...((this as any).hiddenSkills ?? []), skill.id];
+      this.saveCustomSkills();
+      this.buildSidebar();
+    }));
+    if (!skill.builtIn) {
+      menu.addSeparator();
+      menu.addItem((item) => item.setTitle("Remove").setIcon("trash-2").onClick(() => {
+        this.customSkills = this.customSkills.filter((s) => s.id !== skill.id);
+        this.saveCustomSkills();
+        this.buildSidebar();
+      }));
+    }
+    if (skill.builtIn && (this as any).skillConfig[skill.id]) {
+      menu.addSeparator();
+      menu.addItem((item) => item.setTitle("Reset to default").setIcon("rotate-ccw").onClick(() => {
+        delete (this as any).skillConfig[skill.id];
+        (this as any).hiddenSkills = ((this as any).hiddenSkills ?? []).filter((id: string) => id !== skill.id);
+        this.saveCustomSkills();
+        this.buildSidebar();
+      }));
+    }
+    menu.showAtMouseEvent(e);
+  }
+
+  private showSkillEditModal(skill: any) {
+    const editModal = new Modal(this.app);
+    editModal.titleEl.setText("Edit Skill");
+    const form = editModal.contentEl.createDiv({ cls: "mc-skill-edit-form" });
+    form.createEl("label", { text: "Skill ID", cls: "mc-skill-edit-label" });
+    form.createEl("div", { text: "/" + skill.id, cls: "mc-skill-edit-id" });
+    form.createEl("label", { text: "Label", cls: "mc-skill-edit-label" });
+    const labelInput = form.createEl("input", { type: "text" }) as HTMLInputElement;
+    labelInput.value = skill.label;
+    labelInput.className = "mc-skill-edit-input";
+    form.createEl("label", { text: "Description", cls: "mc-skill-edit-label" });
+    const descInput = form.createEl("input", { type: "text" }) as HTMLInputElement;
+    descInput.value = skill.description || "";
+    descInput.className = "mc-skill-edit-input";
+    const btnRow = form.createDiv({ cls: "mc-skill-edit-actions" });
+    const saveBtn = btnRow.createEl("button", { text: "Save", cls: "mod-cta" });
+    saveBtn.addEventListener("click", () => {
+      const newLabel = labelInput.value.trim() || skill.id;
+      const newDesc = descInput.value.trim();
+      if (skill.builtIn) {
+        const cfg = (this as any).skillConfig;
+        cfg[skill.id] = { ...(cfg[skill.id] ?? {}), label: newLabel, description: newDesc };
+      } else {
+        const cs = this.customSkills.find((s) => s.id === skill.id);
+        if (cs) { cs.label = newLabel; cs.description = newDesc; }
+      }
+      this.saveCustomSkills();
+      this.buildSidebar();
+      editModal.close();
+    });
+    editModal.open();
+    labelInput.focus();
   }
 
   renderSidebarCards() {
     this.sidebarDirty = true;
     if (this.isRenaming) return;
     if (!this.standbyEl || !this.workingEl || !this.reviewEl) return;
+    const savedScroll = this.sidebarEl?.scrollTop ?? 0;
 
     // --- Standby: sessions without active tracking (regular terminals + dismissed) ---
     this.standbyEl.empty();
@@ -2042,6 +2157,7 @@ class TerminalView extends ItemView {
     for (const t of toReview) {
       const session = this.sessions.find((s) => s.id === t.sessionId);
       const card = this.reviewEl.createDiv({ cls: "mc-sidebar-card is-review" });
+      if (session && session === this.activeSession) card.addClass("is-active");
       const cardHeader = card.createDiv({ cls: "mc-sidebar-card-header" });
       cardHeader.createSpan({ cls: "mc-sidebar-card-name", text: t.skillName });
 
@@ -2056,6 +2172,7 @@ class TerminalView extends ItemView {
         if (session) this.switchTo(session);
       });
     }
+    if (this.sidebarEl) this.sidebarEl.scrollTop = savedScroll;
   }
 
   private getSkillIcon(skillId: string): string {
@@ -2221,47 +2338,38 @@ class TerminalView extends ItemView {
   }
 
   launchSkill(skill: SkillDef) {
-    // "Start Here" triggers onboarding modal instead of a skill command
     if (skill.id === "start-here") {
       new OnboardingModal(this.app, this).open();
       return;
     }
-
-    // Create a new named session
-    this.createSession(skill.id);
-    const session = this.sessions[this.sessions.length - 1];
+    const session = this.createSession(skill.id);
     if (!session) return;
-
-    // Track the session
     this.tracker?.track(session, skill.id);
-
-    // Launch claude (with auto-mode flag if enabled) — use \r for Enter
     const claudeCmd = this.autoMode
       ? `claude --dangerously-skip-permissions\r`
       : `claude\r`;
-
     setTimeout(() => {
       session.process.stdin?.write(claudeCmd);
-    }, 800);
-
-    // Wait for Claude Code to be ready before sending skill command
+    }, 300);
     let attempts = 0;
     const waitForReady = setInterval(() => {
       attempts++;
+      if (attempts < 5) return;
       const buf = session.terminal.buffer.active;
       const lines: string[] = [];
-      for (let i = buf.length - 1; i >= Math.max(0, buf.length - 10); i--) {
+      for (let i = buf.length - 1; i >= Math.max(0, buf.length - 15); i--) {
         const line = buf.getLine(i)?.translateToString(true)?.trim();
         if (line) lines.push(line);
       }
-      const ready = lines.some((l) => /^❯/.test(l));
-      if (ready || attempts >= 30) {
+      const ready = lines.some((l) => /^❯/.test(l) || /^>\s/.test(l));
+      if (ready || attempts >= 90) {
         clearInterval(waitForReady);
         if (ready) {
           session.process.stdin?.write(`/${skill.id}\r`);
         }
       }
-    }, 1000);
+    }, 300);
+    (session as any)._skillInterval = waitForReady;
   }
 
   private startSidebarRename(card: HTMLElement, session: TerminalSession) {
@@ -2286,6 +2394,7 @@ class TerminalView extends ItemView {
       if (save) {
         const name = input.value.trim();
         if (name) session.name = name;
+          if ((session as any)._toolbarNameEl) (session as any)._toolbarNameEl.textContent = name;
       }
       this.renderSidebarCards();
       this.saveState();
@@ -2301,15 +2410,76 @@ class TerminalView extends ItemView {
     input.select();
   }
 
-  createSession(name?: string) {
-    const id = this.nextId++;
-    const vaultPath = (this.app.vault.adapter as any).basePath as string;
-    const session = new TerminalSession(this.sessionsEl, id, vaultPath, this.app);
-    if (name) session.name = name;
-    this.sessions.push(session);
-    this.switchTo(session);
-    this.renderSidebarCards();
-    this.saveState();
+  private setupAutoName(session: TerminalSession) {
+    let done = false;
+    const check = () => {
+      if (done) return;
+      const buf = session.terminal.buffer.active;
+      for (let i = buf.length - 1; i >= Math.max(0, buf.length - 40); i--) {
+        const line = buf.getLine(i)?.translateToString(true)?.trim();
+        if (!line) continue;
+        if (/^❯\s+.+/.test(line)) {
+          const input = line.replace(/^❯\s+/, "").trim();
+          if (input.length > 2 && input !== "claude" && !input.startsWith("claude ")) {
+            done = true;
+            clearInterval(interval);
+            const newName = input.startsWith("/") ? input.slice(1) : (input.length > 35 ? input.slice(0, 35) + "…" : input);
+            session.name = newName;
+            if ((session as any)._toolbarNameEl) (session as any)._toolbarNameEl.textContent = newName;
+            this.renderSidebarCards();
+            this.saveState();
+            return;
+          }
+        }
+      }
+    };
+    const interval = setInterval(check, 2000);
+    (session as any)._autoNameInterval = interval;
+    setTimeout(() => { if (!done) { clearInterval(interval); done = true; } }, 60000);
+  }
+
+  private addSessionToolbar(session: TerminalSession) {
+    const bar = document.createElement("div");
+    bar.className = "mc-session-toolbar";
+    const nameEl = document.createElement("span");
+    nameEl.className = "mc-session-toolbar-name";
+    nameEl.textContent = session.name;
+    bar.appendChild(nameEl);
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "mc-session-toolbar-close";
+    closeBtn.innerHTML = "\u00D7";
+    closeBtn.title = "Close session";
+    closeBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.closeSession(session);
+    });
+    bar.appendChild(closeBtn);
+    session.containerEl.insertBefore(bar, session.containerEl.firstChild);
+    (session as any)._toolbarNameEl = nameEl;
+  }
+
+  createSession(name?: string): TerminalSession | null {
+    try {
+      const max = (this as any).maxSessions ?? 8;
+      if (this.sessions.length >= max) {
+        new Notice(`Max ${max} sessions. Close one first.`);
+        return null;
+      }
+      const id = this.nextId++;
+      const vaultPath = (this.app.vault.adapter as any).basePath as string;
+      const session = new TerminalSession(this.sessionsEl, id, vaultPath, this.app);
+      if (name) session.name = name;
+      this.addSessionToolbar(session);
+      this.setupAutoName(session);
+      this.sessions.push(session);
+      this.switchTo(session);
+      this.renderSidebarCards();
+      this.saveState();
+      return session;
+    } catch (e) {
+      console.error("[mc] createSession error:", e);
+      return null;
+    }
   }
 
   saveState() {
@@ -2341,6 +2511,8 @@ class TerminalView extends ItemView {
   }
 
   closeSession(session: TerminalSession) {
+    if ((session as any)._autoNameInterval) clearInterval((session as any)._autoNameInterval);
+    if ((session as any)._skillInterval) clearInterval((session as any)._skillInterval);
     session.destroy();
     this.sessions = this.sessions.filter((s) => s !== session);
     this.visibleSessions = this.visibleSessions.filter((s) => s !== session);
@@ -2602,17 +2774,18 @@ class OnboardingModal extends Modal {
     // Wait for shell to be ready, then launch Claude Code
     setTimeout(() => {
       session.process.stdin?.write(claudeCmd);
-    }, 800);
+    }, 300);
 
     // Wait for Claude Code to be ready (trust prompt + startup) before pasting onboarding prompt.
     // Poll stdout activity — send prompt once Claude's ❯ prompt appears.
     let attempts = 0;
-    const maxAttempts = 30; // 30 × 1s = 30s max wait
+    const maxAttempts = 90;
     const waitForReady = setInterval(() => {
       attempts++;
+      if (attempts < 5) return;
       const lines = [];
       const buf = session.terminal.buffer.active;
-      for (let i = buf.length - 1; i >= Math.max(0, buf.length - 10); i--) {
+      for (let i = buf.length - 1; i >= Math.max(0, buf.length - 15); i--) {
         const line = buf.getLine(i)?.translateToString(true)?.trim();
         if (line) lines.push(line);
       }
@@ -2624,7 +2797,7 @@ class OnboardingModal extends Modal {
           session.process.stdin?.write(onboardPrompt + `\r`);
         }
       }
-    }, 1000);
+    }, 300);
   }
 
   onClose() {
@@ -2855,6 +3028,15 @@ class AgentTracker {
     return false;
   }
 
+  /** Check if Claude Code output contains a completion marker */
+  private hasClaudeCompletionMarker(lines: string[]): boolean {
+    for (const line of lines) {
+      if (/✻\s*(Cooked for|Done|Completed)/.test(line)) return true;
+      if (/^✻\s/.test(line)) return true;
+    }
+    return false;
+  }
+
   /** Check if Claude Code TUI markers are present in buffer lines */
   private hasClaudeTuiMarkers(lines: string[]): boolean {
     for (const line of lines) {
@@ -2915,6 +3097,15 @@ class AgentTracker {
         const session = sessions.find((s) => s.id === t.sessionId);
         if (!session) continue;
 
+        const recentLines = this.getRecentLines(session, 10);
+        if (this.hasClaudeCompletionMarker(recentLines)) {
+          t.status = "to-review";
+          t.stateChangedAt = now;
+          t.recentOutputBytes = 0;
+          changed = true;
+          continue;
+        }
+
         // Primary: idle + shell prompt visible → done
         if (idleMs > IDLE_PROMPT_MS && this.isShellPrompt(session)) {
           t.status = "to-review";
@@ -2951,6 +3142,72 @@ class AgentTracker {
 
 // (KanbanView removed — kanban is now integrated into TerminalView sidebar)
 
+// --- Settings Tab ---
+
+class MCSettingTab extends PluginSettingTab {
+  plugin: TerminalPlugin;
+  constructor(app: App, plugin: TerminalPlugin) {
+    super(app, plugin);
+    this.plugin = plugin;
+  }
+  async display() {
+    const { containerEl } = this;
+    containerEl.empty();
+    containerEl.createEl("h2", { text: "Modular Context" });
+    const data = await this.plugin.loadData() ?? {};
+    new Setting(containerEl)
+      .setName("Auto-mode")
+      .setDesc("Launch Claude Code with --dangerously-skip-permissions by default")
+      .addToggle((toggle) => toggle
+        .setValue(data.autoMode ?? false)
+        .onChange(async (value) => {
+          data.autoMode = value;
+          await this.plugin.saveData(data);
+        })
+      );
+    new Setting(containerEl)
+      .setName("Max sessions")
+      .setDesc("Maximum concurrent terminal sessions (1–20)")
+      .addText((text) => text
+        .setValue(String(data.maxSessions ?? 8))
+        .onChange(async (value) => {
+          const num = parseInt(value, 10);
+          if (!isNaN(num) && num >= 1 && num <= 20) {
+            data.maxSessions = num;
+            await this.plugin.saveData(data);
+          }
+        })
+      );
+    new Setting(containerEl)
+      .setName("Font size")
+      .setDesc("Terminal font size in pixels (8–24)")
+      .addText((text) => text
+        .setValue(String(data.fontSize ?? 13.5))
+        .onChange(async (value) => {
+          const num = parseFloat(value);
+          if (!isNaN(num) && num >= 8 && num <= 24) {
+            data.fontSize = num;
+            await this.plugin.saveData(data);
+          }
+        })
+      );
+    new Setting(containerEl)
+      .setName("Default layout")
+      .setDesc("Terminal pane layout")
+      .addDropdown((dropdown) => dropdown
+        .addOption("single", "Single")
+        .addOption("split-h", "Side by side")
+        .addOption("split-v", "Stacked")
+        .addOption("grid", "Grid (2×2)")
+        .setValue(data.layout ?? "single")
+        .onChange(async (value) => {
+          data.layout = value;
+          await this.plugin.saveData(data);
+        })
+      );
+  }
+}
+
 // --- Plugin ---
 
 export default class TerminalPlugin extends Plugin {
@@ -2963,8 +3220,13 @@ export default class TerminalPlugin extends Plugin {
     const path = require("path");
     const vaultBase = (this.app.vault.adapter as any).basePath as string;
     const helperPath = path.join(vaultBase, this.manifest.dir, "pty-helper.py");
-    fs.writeFileSync(helperPath, PTY_HELPER_PY, { mode: 0o755 });
-    ptyHelperPath = helperPath;
+    try {
+      fs.writeFileSync(helperPath, PTY_HELPER_PY, { mode: 0o755 });
+      ptyHelperPath = helperPath;
+    } catch (e) {
+      console.error("[modular-context] Failed to write pty-helper.py:", e);
+      new Notice("Modular Context: Failed to write terminal helper. Check console.");
+    }
 
     // Agent tracker — notifies terminal views to re-render sidebar
     this.agentTracker = new AgentTracker(() => {
@@ -2976,8 +3238,33 @@ export default class TerminalPlugin extends Plugin {
     this.registerView(VIEW_TYPE, (leaf) => {
       const view = new TerminalView(leaf);
       view.tracker = this.agentTracker;
+      (view as any).plugin = this;
       return view;
     });
+
+    this.addSettingTab(new MCSettingTab(this.app, this));
+
+    const layoutCmd = (id: string, name: string, layout: string) => {
+      this.addCommand({
+        id,
+        name,
+        callback: () => {
+          const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE);
+          if (leaves.length === 0) return;
+          const view = leaves[0].view as TerminalView;
+          if (view.fullscreenManager?.isOpen) {
+            view.fullscreenManager.setLayout(layout as any);
+          } else {
+            view.setInlineLayout(layout as any);
+          }
+          view.buildSidebar();
+        },
+      });
+    };
+    layoutCmd("layout-single", "Terminal: Single Pane", "single");
+    layoutCmd("layout-split-h", "Terminal: Side by Side", "split-h");
+    layoutCmd("layout-split-v", "Terminal: Stacked", "split-v");
+    layoutCmd("layout-grid", "Terminal: Grid (2x2)", "grid");
 
     // Register ReceptionOS signet as custom icon
     addIcon("ros-signet", `<g transform="translate(25,0) scale(1.942)"><path fill="currentColor" d="M21.77,12.02c-.53-.83-1.09-1.6-1.68-2.33-.01-.02-.03-.03-.04-.05C15.85,4.37,10.21,1.34,4.3.38c-.4-.07-.8-.13-1.2-.18-.08,0-.15-.02-.23-.03C2.27.11,1.67.06,1.07.03.81.02.55,0,.3,0c-.1,0-.2,0-.3,0v1.03c1.07.02,2.15.1,3.23.27.26.05.51.1.77.16,2.87.83,5.58,2.49,7.8,5.1,2.46,2.92,3.66,6.32,3.82,9.69-2.49-2.67-5.69-4.76-9.42-5.92-2.07-.64-4.15-.95-6.19-.99v.96c1.93.08,3.9.42,5.87,1.07,4.02,1.33,7.33,3.86,9.71,7.03-.17,2.02-.69,3.99-1.54,5.81-3.04-4.28-8-7.26-14.03-7.3v1c5.9.18,10.57,3.4,13.22,7.83-2.65,4.43-7.31,7.65-13.22,7.83v1c6.04-.03,10.99-3.02,14.03-7.3.85,1.82,1.38,3.79,1.54,5.81-2.38,3.17-5.69,5.7-9.71,7.03-1.97.65-3.94.99-5.87,1.07v.96c2.04-.04,4.12-.34,6.19-.99,3.74-1.16,6.94-3.25,9.42-5.92-.16,3.37-1.36,6.77-3.82,9.69-2.22,2.62-4.93,4.28-7.8,5.1-.26.06-.51.11-.77.16-1.08.17-2.16.25-3.23.27v1.03c.1,0,.2,0,.3,0,.26,0,.52-.02.77-.03.6-.03,1.2-.07,1.8-.14.08,0,.15-.02.23-.03.4-.05.8-.1,1.2-.17,5.9-.96,11.55-3.99,15.75-9.25.01-.02.03-.03.04-.05.59-.74,1.15-1.51,1.68-2.33,2.76-4.19,4.02-8.97,3.98-13.73.04-4.76-1.23-9.54-3.98-13.73ZM13.74,6.82c.86.86,1.68,1.8,2.43,2.85,2.78,3.91,3.83,8.39,3.48,12.73-.63-1.46-1.43-2.85-2.37-4.14.26-3.88-.8-7.92-3.53-11.44ZM15.02,25.75c.92-1.62,1.58-3.39,1.95-5.22.94,1.64,1.66,3.4,2.12,5.22-.46,1.83-1.18,3.58-2.12,5.22-.37-1.83-1.03-3.6-1.95-5.22ZM13.74,44.67c2.74-3.52,3.8-7.55,3.53-11.44.95-1.29,1.74-2.68,2.37-4.14.35,4.33-.7,8.82-3.48,12.73-.75,1.05-1.57,1.99-2.43,2.85ZM16.4,43.71c.3-.35.6-.7.88-1.08,3.96-5.23,4.88-11.34,3.5-16.89,1.38-5.55.46-11.67-3.5-16.89-.28-.37-.58-.73-.88-1.08,4.87,4.63,7.55,11.29,7.64,17.97-.09,6.68-2.77,13.33-7.64,17.97Z"/></g>`);

@@ -316,21 +316,63 @@
 .mc-terminal-session {
   position: absolute;
   inset: 0;
-  padding: 10px 6px 14px 12px;
+  padding: 0 6px 14px 12px;
   display: none;
+  flex-direction: column;
   background: var(--background-primary);
 }
 
 .mc-terminal-session.is-active {
-  display: block;
+  display: flex;
 }
 
 .mc-terminal-session .xterm {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
 }
 
 .mc-terminal-session .xterm-viewport {
   overflow-y: auto !important;
+}
+
+/* --- Session top bar --- */
+.mc-session-toolbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 24px;
+  padding: 0 4px 0 8px;
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  margin: 0 -6px 0 -12px;
+}
+
+.mc-session-toolbar-name {
+  font-size: 10px;
+  color: var(--text-faint);
+  font-family: var(--font-interface);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.mc-session-toolbar-close {
+  all: unset;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--text-faint);
+  padding: 0 4px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.mc-session-toolbar-close:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
 }
 
 /* --- Inline multi-pane layout --- */
@@ -388,13 +430,15 @@
 .mc-inline-pane .mc-terminal-session {
   position: relative;
   inset: auto;
-  display: block;
+  display: flex;
+  flex-direction: column;
   flex: 1;
   overflow: hidden;
 }
 
 .mc-inline-pane .mc-terminal-session .xterm {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
 }
 
 /* --- Wiki-link autocomplete --- */
@@ -840,13 +884,15 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
 .mc-fullscreen-pane .mc-terminal-session {
   position: relative;
   inset: auto;
-  display: block;
+  display: flex;
+  flex-direction: column;
   flex: 1;
   overflow: hidden;
 }
 
 .mc-fullscreen-pane .mc-terminal-session .xterm {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
 }
 
 /* --- Sidebar fullscreen + help buttons --- */
@@ -1633,4 +1679,86 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
   color: var(--text-faint);
   text-align: center;
   line-height: 1.5;
+}
+
+/* Skill edit modal */
+.mc-skill-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.mc-skill-edit-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.mc-skill-edit-input {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 13px;
+}
+
+.mc-skill-edit-input:focus {
+  border-color: var(--interactive-accent);
+  outline: none;
+}
+
+.mc-skill-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.mc-skill-edit-id {
+  font-size: 12px;
+  color: var(--text-faint);
+  font-family: var(--font-monospace);
+  padding: 4px 0;
+}
+
+.mc-sidebar-hidden-toggle {
+  padding: 4px 10px;
+  font-size: 10px;
+  color: var(--text-faint);
+  cursor: pointer;
+  user-select: none;
+}
+
+.mc-sidebar-hidden-toggle:hover {
+  color: var(--text-muted);
+}
+
+.mc-sidebar-hidden-list {
+  padding: 0 10px 4px;
+}
+
+.mc-sidebar-hidden-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 0;
+  font-size: 11px;
+}
+
+.mc-sidebar-hidden-name {
+  color: var(--text-faint);
+}
+
+.mc-sidebar-hidden-restore {
+  color: var(--interactive-accent);
+  cursor: pointer;
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.mc-sidebar-hidden-restore:hover {
+  opacity: 1;
+  text-decoration: underline;
 }
