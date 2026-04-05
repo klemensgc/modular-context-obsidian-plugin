@@ -1480,12 +1480,7 @@ class FullscreenManager {
       if (session === this.focusedSession) pane.classList.add("is-focused");
 
       // Show a thin label in multi-pane layouts so you know which is which
-      if (multiPane) {
-        const label = document.createElement("div");
-        label.className = "mc-fullscreen-pane-label";
-        label.textContent = session.name;
-        pane.appendChild(label);
-      }
+      // Session toolbar inside each session already provides name + close
 
       session.containerEl.style.display = "";
       session.containerEl.classList.add("is-active");
@@ -2287,12 +2282,7 @@ class TerminalView extends ItemView {
       if (session === this.activeSession) pane.classList.add("is-focused");
 
       // Label in multi-pane
-      if (visible.length > 1) {
-        const label = document.createElement("div");
-        label.className = "mc-inline-pane-label";
-        label.textContent = session.name;
-        pane.appendChild(label);
-      }
+      // Session toolbar inside each session already provides name + close
 
       session.containerEl.style.display = "";
       session.containerEl.classList.add("is-active", "is-visible");
@@ -2446,6 +2436,35 @@ class TerminalView extends ItemView {
     const nameEl = document.createElement("span");
     nameEl.className = "mc-session-toolbar-name";
     nameEl.textContent = session.name;
+    nameEl.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const input = document.createElement("input");
+      input.type = "text";
+      input.value = session.name;
+      input.className = "mc-session-toolbar-rename";
+      nameEl.replaceWith(input);
+      input.focus();
+      input.select();
+      const finish = (save: boolean) => {
+        if (save) {
+          const val = input.value.trim();
+          if (val) {
+            session.name = val;
+            nameEl.textContent = val;
+          }
+        }
+        input.replaceWith(nameEl);
+        this.renderSidebarCards();
+        this.saveState();
+        setTimeout(() => session.focus(), 0);
+      };
+      input.addEventListener("keydown", (ev) => {
+        ev.stopPropagation();
+        if (ev.key === "Enter") finish(true);
+        if (ev.key === "Escape") finish(false);
+      });
+      input.addEventListener("blur", () => finish(true));
+    });
     bar.appendChild(nameEl);
     const closeBtn = document.createElement("button");
     closeBtn.className = "mc-session-toolbar-close";

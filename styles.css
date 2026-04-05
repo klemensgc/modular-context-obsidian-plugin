@@ -375,6 +375,27 @@
   background: var(--background-modifier-hover);
 }
 
+.mc-session-toolbar-name {
+  cursor: pointer;
+}
+
+.mc-session-toolbar-name:hover {
+  color: var(--text-muted);
+}
+
+.mc-session-toolbar-rename {
+  all: unset;
+  font: inherit;
+  font-size: 10px;
+  color: var(--text-normal);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--interactive-accent);
+  flex: 1;
+  min-width: 0;
+  caret-color: var(--text-normal);
+}
+
 /* --- Inline multi-pane layout --- */
 .mc-terminal-sessions.mc-multi-pane {
   display: grid;
