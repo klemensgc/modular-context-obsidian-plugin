@@ -1630,6 +1630,9 @@ class TerminalView extends ItemView {
   private sidebarPollInterval: ReturnType<typeof setInterval> | null = null;
   tracker: AgentTracker | null = null;
   autoMode = false;
+  private sidebarDirty = true;
+  inlineLayout: "single" | "split-h" | "split-v" | "grid" = "single";
+  private visibleSessions: TerminalSession[] = [];
   customSkills: SkillDef[] = [];
   standbyEl!: HTMLElement;
 
@@ -1703,10 +1706,16 @@ class TerminalView extends ItemView {
     // Hidden tab bar (still needed for fullscreen manager compatibility)
     this.tabBarEl = document.createElement("div");
 
-    // Resize observer to refit active terminal (debounced for smooth dragging)
+    // Resize observer to refit terminals (debounced for smooth dragging)
     this.resizeObserver = new ResizeObserver(() => {
       if (this.resizeTimer) clearTimeout(this.resizeTimer);
-      this.resizeTimer = setTimeout(() => this.activeSession?.fit(), 60);
+      this.resizeTimer = setTimeout(() => {
+        if (this.inlineLayout !== "single" && this.visibleSessions.length > 0) {
+          this.fitAllInlineVisible();
+        } else {
+          this.activeSession?.fit();
+        }
+      }, 60);
     });
     this.resizeObserver.observe(this.sessionsEl);
 
@@ -1723,8 +1732,15 @@ class TerminalView extends ItemView {
     // Create first session (setState will replace this if restoring)
     this.createSession();
 
-    // Sidebar timers
-    this.sidebarTimerInterval = setInterval(() => this.renderSidebarCards(), 1000);
+    // Sidebar timers — render only when dirty, poll every 5s
+    this.sidebarTimerInterval = setInterval(() => {
+      if (this.sidebarDirty) {
+        this.renderSidebarCards();
+        this.sidebarDirty = false;
+      }
+      // Update elapsed time text for working cards (lightweight, no DOM rebuild)
+      this.updateWorkingTimers();
+    }, 1000);
     this.sidebarPollInterval = setInterval(() => {
       this.tracker?.pollWithSessions(this.sessions);
     }, 5000);
@@ -1764,6 +1780,23 @@ class TerminalView extends ItemView {
       setIcon(btnIcon, this.getSkillIcon(skill.id));
       btn.createSpan({ cls: "mc-sidebar-skill-label", text: skill.label });
       btn.addEventListener("click", () => this.launchSkill(skill));
+
+      // Right-click to remove custom skills
+      const isCustom = this.customSkills.some((s) => s.id === skill.id);
+      if (isCustom) {
+        btn.addEventListener("contextmenu", (e) => {
+          e.preventDefault();
+          const menu = new Menu();
+          menu.addItem((item) =>
+            item.setTitle("Remove").setIcon("trash-2").onClick(() => {
+              this.customSkills = this.customSkills.filter((s) => s.id !== skill.id);
+              this.saveCustomSkills();
+              this.buildSidebar();
+            })
+          );
+          menu.showAtMouseEvent(e);
+        });
+      }
     }
 
     // [+] Add custom skill
@@ -1819,16 +1852,18 @@ class TerminalView extends ItemView {
       const btn = layoutGroup.createEl("button", { cls: "mc-sidebar-layout-btn" });
       btn.innerHTML = l.svg;
       btn.title = l.label;
-      // Highlight "single" by default if not in fullscreen, or active layout if in fullscreen
-      const fsLayout = this.fullscreenManager?.isOpen
+      // Highlight current inline layout (or fullscreen layout if in fullscreen)
+      const currentLayout = this.fullscreenManager?.isOpen
         ? (this.fullscreenManager as any).layout
-        : "single";
-      if (l.key === fsLayout) btn.addClass("is-active");
+        : this.inlineLayout;
+      if (l.key === currentLayout) btn.addClass("is-active");
       btn.addEventListener("click", () => {
-        if (!this.fullscreenManager?.isOpen) {
-          this.fullscreenManager?.enter(l.key as any);
-        } else {
+        if (this.fullscreenManager?.isOpen) {
+          // If in fullscreen, change fullscreen layout
           this.fullscreenManager?.setLayout(l.key as any);
+        } else {
+          // In normal mode, switch inline layout (no fullscreen)
+          this.setInlineLayout(l.key as any);
         }
         // Re-highlight active
         layoutGroup.querySelectorAll(".mc-sidebar-layout-btn").forEach((b, i) => {
@@ -1893,17 +1928,18 @@ class TerminalView extends ItemView {
 
   private async saveCustomSkills() {
     // Save via plugin data — access plugin through app
-    const pluginData = await (this.app as any).plugins?.plugins?.["internetmc-terminal"]?.loadData() ?? {};
+    const pluginData = await (this.app as any).plugins?.plugins?.["modular-context"]?.loadData() ?? {};
     pluginData.customSkills = this.customSkills;
-    await (this.app as any).plugins?.plugins?.["internetmc-terminal"]?.saveData(pluginData);
+    await (this.app as any).plugins?.plugins?.["modular-context"]?.saveData(pluginData);
   }
 
   async loadCustomSkills() {
-    const pluginData = await (this.app as any).plugins?.plugins?.["internetmc-terminal"]?.loadData() ?? {};
+    const pluginData = await (this.app as any).plugins?.plugins?.["modular-context"]?.loadData() ?? {};
     this.customSkills = pluginData.customSkills ?? [];
   }
 
   renderSidebarCards() {
+    this.sidebarDirty = true;
     if (this.isRenaming) return;
     if (!this.standbyEl || !this.workingEl || !this.reviewEl) return;
 
@@ -2024,6 +2060,7 @@ class TerminalView extends ItemView {
 
   private getSkillIcon(skillId: string): string {
     const icons: Record<string, string> = {
+      "start-here": "rocket",
       "process-transcripts": "file-text",
       "pulse": "activity",
       "brief": "file-output",
@@ -2047,7 +2084,149 @@ class TerminalView extends ItemView {
     return `${h}h ${m % 60}m`;
   }
 
+  /** Apply inline layout — show multiple sessions in CSS grid */
+  setInlineLayout(layout: "single" | "split-h" | "split-v" | "grid") {
+    this.inlineLayout = layout;
+    this.sessionsEl.dataset.layout = layout;
+
+    if (layout === "single") {
+      // Revert to normal single-session mode
+      this.sessionsEl.classList.remove("mc-multi-pane");
+      // Remove pane wrappers, put sessions back directly
+      for (const session of this.sessions) {
+        const pane = session.containerEl.closest(".mc-inline-pane");
+        if (pane) {
+          this.sessionsEl.appendChild(session.containerEl);
+          pane.remove();
+        }
+        session.containerEl.classList.remove("is-visible");
+        session.containerEl.style.display = "";
+      }
+      this.visibleSessions = [];
+      // Re-show active session
+      if (this.activeSession) {
+        this.activeSession.show(true);
+      }
+      requestAnimationFrame(() => this.activeSession?.fit());
+    } else {
+      // Multi-pane mode
+      this.sessionsEl.classList.add("mc-multi-pane");
+      this.rebuildInlinePanes();
+    }
+    this.renderSidebarCards();
+  }
+
+  /** Rebuild inline panes based on current layout */
+  private rebuildInlinePanes() {
+    // Clear existing panes
+    const existingPanes = this.sessionsEl.querySelectorAll(".mc-inline-pane");
+    existingPanes.forEach((p) => {
+      // Move sessions back to sessionsEl before removing pane
+      const sessionEl = p.querySelector(".mc-terminal-session");
+      if (sessionEl) this.sessionsEl.appendChild(sessionEl);
+      p.remove();
+    });
+
+    // Determine which sessions to show
+    const all = this.sessions;
+    let visible: TerminalSession[];
+    const activeIdx = this.activeSession ? all.indexOf(this.activeSession) : 0;
+
+    switch (this.inlineLayout) {
+      case "split-h":
+      case "split-v": {
+        if (all.length <= 1) {
+          visible = [...all];
+        } else {
+          const other = all[(activeIdx + 1) % all.length];
+          visible = this.activeSession
+            ? (this.activeSession === other ? [this.activeSession] : [this.activeSession, other])
+            : all.slice(0, 2);
+        }
+        break;
+      }
+      case "grid":
+        visible = all.slice(0, 4);
+        break;
+      default:
+        visible = this.activeSession ? [this.activeSession] : all.slice(0, 1);
+    }
+
+    this.visibleSessions = visible;
+    const visibleSet = new Set(visible);
+
+    // Hide non-visible sessions
+    for (const session of all) {
+      if (!visibleSet.has(session)) {
+        session.containerEl.style.display = "none";
+        session.containerEl.classList.remove("is-active", "is-visible");
+      }
+    }
+
+    // Create pane wrappers for visible sessions
+    for (const session of visible) {
+      const pane = document.createElement("div");
+      pane.className = "mc-inline-pane";
+      if (session === this.activeSession) pane.classList.add("is-focused");
+
+      // Label in multi-pane
+      if (visible.length > 1) {
+        const label = document.createElement("div");
+        label.className = "mc-inline-pane-label";
+        label.textContent = session.name;
+        pane.appendChild(label);
+      }
+
+      session.containerEl.style.display = "";
+      session.containerEl.classList.add("is-active", "is-visible");
+      pane.appendChild(session.containerEl);
+
+      pane.addEventListener("mousedown", () => {
+        if (this.activeSession !== session) {
+          this.activeSession = session;
+          this.sessionsEl.querySelectorAll(".mc-inline-pane").forEach((p) => {
+            p.classList.toggle("is-focused", p === pane);
+          });
+          session.focus();
+          this.renderSidebarCards();
+        }
+      });
+
+      this.sessionsEl.appendChild(pane);
+    }
+
+    requestAnimationFrame(() => this.fitAllInlineVisible());
+  }
+
+  /** Fit all visible sessions in inline multi-pane mode */
+  private fitAllInlineVisible() {
+    for (const session of this.visibleSessions) {
+      session.fit();
+    }
+    if (this.activeSession && this.visibleSessions.includes(this.activeSession)) {
+      this.activeSession.focus();
+    }
+  }
+
+  /** Lightweight timer update — only touches time text elements, no DOM rebuild */
+  private updateWorkingTimers() {
+    const working = this.tracker?.getWorking() ?? [];
+    const timeEls = this.workingEl?.querySelectorAll(".mc-sidebar-card-time");
+    if (!timeEls) return;
+    timeEls.forEach((el, i) => {
+      if (i < working.length) {
+        el.textContent = this.formatElapsed(Date.now() - working[i].startedAt);
+      }
+    });
+  }
+
   launchSkill(skill: SkillDef) {
+    // "Start Here" triggers onboarding modal instead of a skill command
+    if (skill.id === "start-here") {
+      new OnboardingModal(this.app, this).open();
+      return;
+    }
+
     // Create a new named session
     this.createSession(skill.id);
     const session = this.sessions[this.sessions.length - 1];
@@ -2063,11 +2242,26 @@ class TerminalView extends ItemView {
 
     setTimeout(() => {
       session.process.stdin?.write(claudeCmd);
-    }, 500);
+    }, 800);
 
-    setTimeout(() => {
-      session.process.stdin?.write(`/${skill.id}\r`);
-    }, 3000);
+    // Wait for Claude Code to be ready before sending skill command
+    let attempts = 0;
+    const waitForReady = setInterval(() => {
+      attempts++;
+      const buf = session.terminal.buffer.active;
+      const lines: string[] = [];
+      for (let i = buf.length - 1; i >= Math.max(0, buf.length - 10); i--) {
+        const line = buf.getLine(i)?.translateToString(true)?.trim();
+        if (line) lines.push(line);
+      }
+      const ready = lines.some((l) => /^❯/.test(l));
+      if (ready || attempts >= 30) {
+        clearInterval(waitForReady);
+        if (ready) {
+          session.process.stdin?.write(`/${skill.id}\r`);
+        }
+      }
+    }, 1000);
   }
 
   private startSidebarRename(card: HTMLElement, session: TerminalSession) {
@@ -2124,11 +2318,24 @@ class TerminalView extends ItemView {
 
   switchTo(session: TerminalSession) {
     if (session === this.activeSession) return;
-    if (this.activeSession) {
-      this.activeSession.hide();
+    if (this.inlineLayout === "single") {
+      if (this.activeSession) this.activeSession.hide();
+      this.activeSession = session;
+      session.show(this.isRenaming);
+    } else {
+      // Multi-pane: just change active focus, rebuild panes if needed
+      this.activeSession = session;
+      if (!this.visibleSessions.includes(session)) {
+        this.rebuildInlinePanes();
+      } else {
+        // Just update focus highlight
+        this.sessionsEl.querySelectorAll(".mc-inline-pane").forEach((pane) => {
+          const hasSession = pane.contains(session.containerEl);
+          pane.classList.toggle("is-focused", hasSession);
+        });
+        session.focus();
+      }
     }
-    this.activeSession = session;
-    session.show(this.isRenaming);
     this.renderSidebarCards();
     this.saveState();
   }
@@ -2136,6 +2343,7 @@ class TerminalView extends ItemView {
   closeSession(session: TerminalSession) {
     session.destroy();
     this.sessions = this.sessions.filter((s) => s !== session);
+    this.visibleSessions = this.visibleSessions.filter((s) => s !== session);
     this.tracker?.untrack(session.id);
 
     if (this.activeSession === session) {
@@ -2143,6 +2351,10 @@ class TerminalView extends ItemView {
       if (this.sessions.length > 0) {
         this.switchTo(this.sessions[this.sessions.length - 1]);
       }
+    }
+    // Rebuild panes if in multi-pane mode
+    if (this.inlineLayout !== "single" && this.sessions.length > 0) {
+      this.rebuildInlinePanes();
     }
     this.renderSidebarCards();
     this.saveState();
@@ -2387,13 +2599,32 @@ class OnboardingModal extends Modal {
       `Remember: the human curates and thinks. You do the bookkeeping. The wiki stays maintained because the cost of maintenance is near zero. Respond in the same language as CLAUDE.md (or English if none exists).`,
     ].join("\\n");
 
+    // Wait for shell to be ready, then launch Claude Code
     setTimeout(() => {
       session.process.stdin?.write(claudeCmd);
-    }, 500);
+    }, 800);
 
-    setTimeout(() => {
-      session.process.stdin?.write(onboardPrompt + `\r`);
-    }, 3000);
+    // Wait for Claude Code to be ready (trust prompt + startup) before pasting onboarding prompt.
+    // Poll stdout activity — send prompt once Claude's ❯ prompt appears.
+    let attempts = 0;
+    const maxAttempts = 30; // 30 × 1s = 30s max wait
+    const waitForReady = setInterval(() => {
+      attempts++;
+      const lines = [];
+      const buf = session.terminal.buffer.active;
+      for (let i = buf.length - 1; i >= Math.max(0, buf.length - 10); i--) {
+        const line = buf.getLine(i)?.translateToString(true)?.trim();
+        if (line) lines.push(line);
+      }
+      // Claude Code is ready when we see its ❯ prompt
+      const ready = lines.some((l) => /^❯\s*$/.test(l) || /^❯ $/.test(l));
+      if (ready || attempts >= maxAttempts) {
+        clearInterval(waitForReady);
+        if (ready) {
+          session.process.stdin?.write(onboardPrompt + `\r`);
+        }
+      }
+    }, 1000);
   }
 
   onClose() {
@@ -2478,6 +2709,7 @@ interface SkillDef {
 }
 
 const SKILLS: SkillDef[] = [
+  { id: "start-here", label: "Start Here", description: "Onboarding agent — scan vault, build modular-context structure", primary: true },
   { id: "process-transcripts", label: "Ingest Data", description: "Process new sources — categorize, extract insights, update wiki modules", primary: true },
   { id: "pulse", label: "Pulse", description: "Vault health check — staleness radar, strategic questions, next steps", primary: true },
   { id: "brief", label: "Brief", description: "Generate PDF brief or one-pager from vault knowledge", primary: true },
@@ -2491,70 +2723,88 @@ const SKILLS: SkillDef[] = [
 
 // --- Agent Tracker ---
 
+const MIN_DWELL_MS = 5000;       // minimum time in any state before transition
+const IDLE_PROMPT_MS = 15000;     // idle + shell prompt → to-review
+const IDLE_SAFETY_MS = 90000;     // idle safety net → to-review regardless
+const REVIVE_BYTES = 200;         // bytes needed to revive from to-review
+const REVIVE_WINDOW_MS = 5000;    // window for revive byte counting
+const AUTO_DETECT_WINDOW_MS = 8000; // window for auto-detect
+
 interface TrackedSession {
   sessionId: number;
   skillName: string;
   startedAt: number;
   lastActivityAt: number;
   status: "working" | "to-review" | "dismissed";
+  stateChangedAt: number;
+  recentOutputBytes: number;
+  outputWindowStart: number;
 }
 
 class AgentTracker {
   tracked: TrackedSession[] = [];
   private listeners: Map<number, (data: Buffer) => void> = new Map();
-  private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private exitListeners: Map<number, () => void> = new Map();
   private onChange: () => void;
 
   constructor(onChange: () => void) {
     this.onChange = onChange;
   }
 
-  start() {
-    if (this.pollTimer) return;
-    this.pollTimer = setInterval(() => this.poll(), 5000);
-  }
+  // Polling is driven by TerminalView — no internal timer needed
 
   stop() {
-    if (this.pollTimer) {
-      clearInterval(this.pollTimer);
-      this.pollTimer = null;
-    }
     this.listeners.clear();
+    this.exitListeners.clear();
   }
 
   track(session: TerminalSession, skillName: string) {
-    // Remove existing tracking for this session if any
     this.untrack(session.id);
 
+    const now = Date.now();
     const entry: TrackedSession = {
       sessionId: session.id,
       skillName,
-      startedAt: Date.now(),
-      lastActivityAt: Date.now(),
+      startedAt: now,
+      lastActivityAt: now,
       status: "working",
+      stateChangedAt: now,
+      recentOutputBytes: 0,
+      outputWindowStart: now,
     };
     this.tracked.push(entry);
+    this.attachListeners(session, entry);
+    this.onChange();
+  }
 
-    // Listen for stdout activity — revive to "working" if new output arrives
-    const listener = () => {
-      const t = this.tracked.find((tr) => tr.sessionId === session.id);
-      if (t) {
-        t.lastActivityAt = Date.now();
-        if (t.status === "to-review") {
-          t.status = "working";
-          this.onChange();
-        }
+  private attachListeners(session: TerminalSession, entry: TrackedSession) {
+    // stdout: accumulate bytes + update activity timestamp (do NOT change state here)
+    const stdoutListener = (data: Buffer) => {
+      const t = this.tracked.find((tr) => tr.sessionId === entry.sessionId);
+      if (!t) return;
+      t.lastActivityAt = Date.now();
+      t.recentOutputBytes += data.length;
+    };
+    session.process.stdout?.on("data", stdoutListener);
+    this.listeners.set(session.id, stdoutListener);
+
+    // process exit: immediate transition to to-review
+    const exitListener = () => {
+      const t = this.tracked.find((tr) => tr.sessionId === entry.sessionId);
+      if (t && t.status === "working") {
+        t.status = "to-review";
+        t.stateChangedAt = Date.now();
+        this.onChange();
       }
     };
-    session.process.stdout?.on("data", listener);
-    this.listeners.set(session.id, listener);
-
-    this.onChange();
+    session.process.on("exit", exitListener);
+    this.exitListeners.set(session.id, exitListener);
   }
 
   untrack(sessionId: number) {
     this.tracked = this.tracked.filter((t) => t.sessionId !== sessionId);
     this.listeners.delete(sessionId);
+    this.exitListeners.delete(sessionId);
     this.onChange();
   }
 
@@ -2562,6 +2812,7 @@ class AgentTracker {
     const t = this.tracked.find((t) => t.sessionId === sessionId);
     if (t) {
       t.status = "dismissed";
+      t.stateChangedAt = Date.now();
       this.onChange();
     }
   }
@@ -2574,102 +2825,123 @@ class AgentTracker {
     return this.tracked.filter((t) => t.status === "to-review");
   }
 
-  private poll() {
-    let changed = false;
-    for (const t of this.tracked) {
-      if (t.status !== "working") continue;
-      const idleMs = Date.now() - t.lastActivityAt;
-      if (idleMs > 30000) {
-        // Check if we can find the terminal session to inspect the buffer
-        // If idle for >30s, move to review (the session likely finished)
-        t.status = "to-review";
-        changed = true;
-      }
-    }
-    if (changed) this.onChange();
-  }
-
-  /** Read the last non-empty line from a terminal buffer */
-  private getLastLine(session: TerminalSession): string {
+  /** Read recent non-empty lines from terminal buffer */
+  private getRecentLines(session: TerminalSession, count: number): string[] {
     const buf = session.terminal.buffer.active;
-    for (let i = buf.length - 1; i >= Math.max(0, buf.length - 10); i--) {
+    const lines: string[] = [];
+    for (let i = buf.length - 1; i >= Math.max(0, buf.length - 50) && lines.length < count; i--) {
       const line = buf.getLine(i)?.translateToString(true)?.trim();
-      if (line) return line;
+      if (line) lines.push(line);
     }
-    return "";
+    return lines;
   }
 
-  /** Check if a line looks like a bare shell prompt (not Claude/app) */
-  private isShellPrompt(line: string): boolean {
-    return /[$%#>❯→]\s*$/.test(line);
-  }
+  /** Check if the terminal shows a bare shell prompt (NOT Claude Code's prompt) */
+  private isShellPrompt(session: TerminalSession): boolean {
+    const lines = this.getRecentLines(session, 5);
+    if (lines.length === 0) return false;
+    const last = lines[0];
 
-  /** Check if a terminal is running something interactive (not a bare shell) */
-  private isRunningProcess(session: TerminalSession): boolean {
-    const last = this.getLastLine(session);
-    if (!last) return false;
-    // Bare shell prompt = nothing running
-    if (this.isShellPrompt(last)) return false;
-    // Claude Code patterns
-    if (/claude|anthropic|╭|╰|❯|>\s/.test(last)) return true;
-    // Active output (not just a prompt) = something running
-    if (last.length > 5) return true;
+    // If Claude Code TUI is visible in recent lines, this is NOT a shell prompt
+    if (this.hasClaudeTuiMarkers(lines)) return false;
+
+    // Common shell prompt endings
+    if (/[$%#]\s*$/.test(last)) return true;
+    // Oh-my-zsh arrow
+    if (/^➜\s/.test(last)) return true;
+    // username@host with prompt char
+    if (/^\S+@\S+[^╭╰]*[$%#]\s*$/.test(last)) return true;
+
     return false;
   }
 
-  /** Enhanced poll that auto-detects active sessions and checks for completion */
+  /** Check if Claude Code TUI markers are present in buffer lines */
+  private hasClaudeTuiMarkers(lines: string[]): boolean {
+    for (const line of lines) {
+      if (/^[╭╰│]/.test(line)) return true;
+      if (/Allow\?\s*\[/.test(line)) return true;
+      if (/Welcome to Claude/.test(line)) return true;
+      if (/^❯\s/.test(line)) return true;
+    }
+    return false;
+  }
+
+  /** Check if Claude Code appears active in the terminal buffer */
+  private isClaudeCodeActive(session: TerminalSession): boolean {
+    return this.hasClaudeTuiMarkers(this.getRecentLines(session, 30));
+  }
+
+  /** Single unified poll — called from TerminalView every 5s */
   pollWithSessions(sessions: TerminalSession[]) {
     let changed = false;
+    const now = Date.now();
     const trackedIds = new Set(this.tracked.map((t) => t.sessionId));
 
-    // --- Auto-detect: untracked sessions with RECENT activity + running process → promote to Working ---
+    // --- Auto-detect: untracked sessions with Claude TUI visible + recent output ---
     for (const session of sessions) {
       if (trackedIds.has(session.id)) continue;
-      // Only auto-detect if the session had stdout in the last 10 seconds
-      // (avoids promoting idle terminals with old output in the buffer)
-      const hasRecentActivity = session._lastStdoutAt > 0 && (Date.now() - session._lastStdoutAt < 10000);
-      if (hasRecentActivity && this.isRunningProcess(session)) {
-        // Auto-track this session
-        const entry: TrackedSession = {
-          sessionId: session.id,
-          skillName: session.name,
-          startedAt: Date.now(),
-          lastActivityAt: Date.now(),
-          status: "working",
-        };
-        this.tracked.push(entry);
-        trackedIds.add(session.id);
+      if (session._lastStdoutAt === 0 || now - session._lastStdoutAt > AUTO_DETECT_WINDOW_MS) continue;
+      if (!this.isClaudeCodeActive(session)) continue;
 
-        // Listen for stdout activity
-        const listener = () => {
-          const t = this.tracked.find((tr) => tr.sessionId === session.id);
-          if (t) {
-            t.lastActivityAt = Date.now();
-            if (t.status === "to-review") {
-              t.status = "working";
-              this.onChange();
-            }
-          }
-        };
-        session.process.stdout?.on("data", listener);
-        this.listeners.set(session.id, listener);
-        changed = true;
-      }
+      const entry: TrackedSession = {
+        sessionId: session.id,
+        skillName: session.name,
+        startedAt: now,
+        lastActivityAt: now,
+        status: "working",
+        stateChangedAt: now,
+        recentOutputBytes: 0,
+        outputWindowStart: now,
+      };
+      this.tracked.push(entry);
+      trackedIds.add(session.id);
+      this.attachListeners(session, entry);
+      changed = true;
     }
 
-    // --- Check tracked "working" sessions for completion ---
+    // --- State transitions for tracked sessions ---
     for (const t of this.tracked) {
-      if (t.status !== "working") continue;
-      const idleMs = Date.now() - t.lastActivityAt;
-      if (idleMs < 15000) continue;
+      const dwellMs = now - t.stateChangedAt;
 
-      const session = sessions.find((s) => s.id === t.sessionId);
-      if (!session) continue;
+      // Reset output byte counter periodically
+      if (now - t.outputWindowStart > REVIVE_WINDOW_MS) {
+        t.recentOutputBytes = 0;
+        t.outputWindowStart = now;
+      }
 
-      const isPrompt = this.isShellPrompt(this.getLastLine(session));
-      if (idleMs > 30000 || (idleMs > 15000 && isPrompt)) {
-        t.status = "to-review";
-        changed = true;
+      if (t.status === "working") {
+        if (dwellMs < MIN_DWELL_MS) continue;
+        const idleMs = now - t.lastActivityAt;
+        const session = sessions.find((s) => s.id === t.sessionId);
+        if (!session) continue;
+
+        // Primary: idle + shell prompt visible → done
+        if (idleMs > IDLE_PROMPT_MS && this.isShellPrompt(session)) {
+          t.status = "to-review";
+          t.stateChangedAt = now;
+          t.recentOutputBytes = 0;
+          changed = true;
+        }
+        // Safety net: very long idle → done regardless
+        else if (idleMs > IDLE_SAFETY_MS) {
+          t.status = "to-review";
+          t.stateChangedAt = now;
+          t.recentOutputBytes = 0;
+          changed = true;
+        }
+      }
+      else if (t.status === "to-review") {
+        if (dwellMs < MIN_DWELL_MS) continue;
+        const session = sessions.find((s) => s.id === t.sessionId);
+        if (!session) continue;
+
+        // Revive: sustained output + Claude TUI visible → back to working
+        if (t.recentOutputBytes > REVIVE_BYTES && this.isClaudeCodeActive(session)) {
+          t.status = "working";
+          t.stateChangedAt = now;
+          t.recentOutputBytes = 0;
+          changed = true;
+        }
       }
     }
 
@@ -2700,7 +2972,6 @@ export default class TerminalPlugin extends Plugin {
         (leaf.view as TerminalView).renderSidebarCards();
       }
     });
-    this.agentTracker.start();
 
     this.registerView(VIEW_TYPE, (leaf) => {
       const view = new TerminalView(leaf);
@@ -2828,7 +3099,17 @@ export default class TerminalPlugin extends Plugin {
     if (this.app.workspace.getLeavesOfType(VIEW_TYPE).length > 0) return;
     const leaf = this.app.workspace.getRightLeaf(false);
     if (leaf) {
-      await leaf.setViewState({ type: VIEW_TYPE, active: false });
+      await leaf.setViewState({ type: VIEW_TYPE, active: true });
+      // Expand right sidebar so terminal is visible and properly sized
+      this.app.workspace.rightSplit.expand();
+      // Delayed fit to ensure the container has been laid out
+      setTimeout(() => {
+        const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE);
+        if (leaves.length > 0) {
+          const view = leaves[0].view as TerminalView;
+          view.activeSession?.fit();
+        }
+      }, 300);
     }
   }
 

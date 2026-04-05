@@ -333,6 +333,70 @@
   overflow-y: auto !important;
 }
 
+/* --- Inline multi-pane layout --- */
+.mc-terminal-sessions.mc-multi-pane {
+  display: grid;
+  gap: 1px;
+  background: var(--background-secondary);
+}
+
+.mc-terminal-sessions.mc-multi-pane[data-layout="split-h"] {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr;
+}
+
+.mc-terminal-sessions.mc-multi-pane[data-layout="split-v"] {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+.mc-terminal-sessions.mc-multi-pane[data-layout="grid"] {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+.mc-inline-pane {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--background-primary);
+  border: 1px solid transparent;
+  transition: border-color 0.15s;
+}
+
+.mc-inline-pane.is-focused {
+  border-color: var(--interactive-accent);
+}
+
+.mc-inline-pane-label {
+  padding: 3px 8px;
+  font-family: var(--font-interface);
+  font-size: 10px;
+  font-weight: 450;
+  letter-spacing: 0.02em;
+  color: var(--text-faint);
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.mc-inline-pane.is-focused .mc-inline-pane-label {
+  color: var(--interactive-accent);
+}
+
+.mc-inline-pane .mc-terminal-session {
+  position: relative;
+  inset: auto;
+  display: block;
+  flex: 1;
+  overflow: hidden;
+}
+
+.mc-inline-pane .mc-terminal-session .xterm {
+  height: 100%;
+}
+
 /* --- Wiki-link autocomplete --- */
 .mc-wikilink-dropdown {
   position: absolute;
