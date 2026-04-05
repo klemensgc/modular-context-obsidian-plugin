@@ -91,7 +91,7 @@ A `pipeline.md` (hot, 7d) untouched for 10 days is **stale** (ratio 1.4). A `vis
 
 | Skill | Description |
 |-------|-------------|
-| **Process Transcripts** | Process transcript backlog — categorize, extract, update modules |
+| **Ingest Data** | Process transcript backlog — categorize, extract, update modules |
 | **Pulse** | Vault health check — staleness radar, strategic questions, next steps |
 | **Brief** | Generate PDF brief or one-pager from vault knowledge |
 | **Log** | Close session — generate session log, commit changes |
