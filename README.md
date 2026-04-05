@@ -1,5 +1,7 @@
 # Modular Context
 
+![banner](banner.png)
+
 > AI-native knowledge terminal for Obsidian — agent dashboard, skills sidebar, wiki-link autocomplete, and the modular-context methodology. By receptionOS.
 
 ![Version](https://img.shields.io/github/v/release/klemensgc/modular-context-obsidian-plugin)
