@@ -2351,25 +2351,27 @@ class TerminalView extends ItemView {
     setTimeout(() => {
       session.process.stdin?.write(claudeCmd);
     }, 300);
-    let attempts = 0;
-    const waitForReady = setInterval(() => {
-      attempts++;
-      if (attempts < 5) return;
-      const buf = session.terminal.buffer.active;
-      const lines: string[] = [];
-      for (let i = buf.length - 1; i >= Math.max(0, buf.length - 15); i--) {
-        const line = buf.getLine(i)?.translateToString(true)?.trim();
-        if (line) lines.push(line);
-      }
-      const ready = lines.some((l) => /^❯/.test(l) || /^>\s/.test(l));
-      if (ready || attempts >= 90) {
-        clearInterval(waitForReady);
-        if (ready) {
+    // Listen to raw stdout for ❯ prompt — much more reliable than polling terminal buffer
+    let sent = false;
+    const onData = (data: Buffer) => {
+      if (sent) return;
+      if (data.toString().includes("❯")) {
+        sent = true;
+        session.process.stdout?.removeListener("data", onData);
+        setTimeout(() => {
           session.process.stdin?.write(`/${skill.id}\r`);
-        }
+        }, 200);
       }
-    }, 300);
-    (session as any)._skillInterval = waitForReady;
+    };
+    session.process.stdout?.on("data", onData);
+    // Safety: stop listening after 30s
+    const safetyTimeout = setTimeout(() => {
+      if (!sent) session.process.stdout?.removeListener("data", onData);
+    }, 30000);
+    (session as any)._skillCleanup = () => {
+      session.process.stdout?.removeListener("data", onData);
+      clearTimeout(safetyTimeout);
+    };
   }
 
   private startSidebarRename(card: HTMLElement, session: TerminalSession) {
@@ -2512,7 +2514,7 @@ class TerminalView extends ItemView {
 
   closeSession(session: TerminalSession) {
     if ((session as any)._autoNameInterval) clearInterval((session as any)._autoNameInterval);
-    if ((session as any)._skillInterval) clearInterval((session as any)._skillInterval);
+    if ((session as any)._skillCleanup) (session as any)._skillCleanup();
     session.destroy();
     this.sessions = this.sessions.filter((s) => s !== session);
     this.visibleSessions = this.visibleSessions.filter((s) => s !== session);
@@ -2776,28 +2778,22 @@ class OnboardingModal extends Modal {
       session.process.stdin?.write(claudeCmd);
     }, 300);
 
-    // Wait for Claude Code to be ready (trust prompt + startup) before pasting onboarding prompt.
-    // Poll stdout activity — send prompt once Claude's ❯ prompt appears.
-    let attempts = 0;
-    const maxAttempts = 90;
-    const waitForReady = setInterval(() => {
-      attempts++;
-      if (attempts < 5) return;
-      const lines = [];
-      const buf = session.terminal.buffer.active;
-      for (let i = buf.length - 1; i >= Math.max(0, buf.length - 15); i--) {
-        const line = buf.getLine(i)?.translateToString(true)?.trim();
-        if (line) lines.push(line);
-      }
-      // Claude Code is ready when we see its ❯ prompt
-      const ready = lines.some((l) => /^❯\s*$/.test(l) || /^❯ $/.test(l));
-      if (ready || attempts >= maxAttempts) {
-        clearInterval(waitForReady);
-        if (ready) {
+    // Listen to raw stdout for ❯ prompt — reliable across TUI modes
+    let sent = false;
+    const onData = (data: Buffer) => {
+      if (sent) return;
+      if (data.toString().includes("❯")) {
+        sent = true;
+        session.process.stdout?.removeListener("data", onData);
+        setTimeout(() => {
           session.process.stdin?.write(onboardPrompt + `\r`);
-        }
+        }, 200);
       }
-    }, 300);
+    };
+    session.process.stdout?.on("data", onData);
+    setTimeout(() => {
+      if (!sent) session.process.stdout?.removeListener("data", onData);
+    }, 30000);
   }
 
   onClose() {
