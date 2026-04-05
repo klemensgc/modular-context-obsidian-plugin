@@ -3093,13 +3093,17 @@ class AgentTracker {
         const session = sessions.find((s) => s.id === t.sessionId);
         if (!session) continue;
 
-        const recentLines = this.getRecentLines(session, 10);
-        if (this.hasClaudeCompletionMarker(recentLines)) {
-          t.status = "to-review";
-          t.stateChangedAt = now;
-          t.recentOutputBytes = 0;
-          changed = true;
-          continue;
+        // Only check completion marker in last 3 lines AND when idle >2s
+        // Prevents false positives from old markers still in buffer after revive
+        if (idleMs > 2000) {
+          const tailLines = this.getRecentLines(session, 3);
+          if (this.hasClaudeCompletionMarker(tailLines)) {
+            t.status = "to-review";
+            t.stateChangedAt = now;
+            t.recentOutputBytes = 0;
+            changed = true;
+            continue;
+          }
         }
 
         // Primary: idle + shell prompt visible → done
