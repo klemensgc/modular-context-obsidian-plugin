@@ -2,8 +2,8 @@
 
 > AI-native knowledge terminal for Obsidian — agent dashboard, skills sidebar, wiki-link autocomplete, and the modular-context methodology. By receptionOS.
 
-![Version](https://img.shields.io/github/v/release/receptionOS/modular-context)
-![License](https://img.shields.io/github/license/receptionOS/modular-context)
+![Version](https://img.shields.io/github/v/release/klemensgc/modular-context-obsidian-plugin)
+![License](https://img.shields.io/github/license/klemensgc/modular-context-obsidian-plugin)
 ![Platform](https://img.shields.io/badge/platform-macOS-blue)
 ![Obsidian](https://img.shields.io/badge/Obsidian-0.15+-purple)
 
@@ -111,12 +111,12 @@ Add custom skills with the **[+]** button. Each skill maps to a Claude Code `/sk
 
 1. Install the [BRAT plugin](https://github.com/TfTHacker/obsidian42-brat) from Obsidian's community plugins
 2. Open BRAT settings and click **Add Beta plugin**
-3. Enter `receptionOS/modular-context` and click Add Plugin
+3. Enter `klemensgc/modular-context-obsidian-plugin` and click Add Plugin
 4. Enable the plugin in Settings > Community Plugins
 
 ### Manual
 
-1. Download from the [latest release](https://github.com/receptionOS/modular-context/releases/latest)
+1. Download from the [latest release](https://github.com/klemensgc/modular-context-obsidian-plugin/releases/latest)
 2. Unzip into your vault's `.obsidian/plugins/modular-context/`
 3. Restart Obsidian, then enable the plugin in Settings > Community Plugins
 
@@ -174,7 +174,7 @@ You can re-trigger onboarding anytime from the sidebar.
 ## Building from source
 
 ```bash
-git clone https://github.com/receptionOS/modular-context.git
+git clone https://github.com/klemensgc/modular-context-obsidian-plugin.git
 cd modular-context
 npm install
 npm run build
