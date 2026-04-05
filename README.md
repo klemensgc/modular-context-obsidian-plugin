@@ -51,7 +51,7 @@ An Obsidian plugin that turns your vault into an **LLM Wiki** — a persistent, 
 
 | Operation | What it does | Skill |
 |-----------|-------------|-------|
-| **INGEST** | Process sources into wiki modules | `/process-transcripts` |
+| **INGEST** | Process new sources into wiki modules | `/process-transcripts` |
 | **QUERY** | Ask questions, synthesize answers, file insights back | `/brief`, `/ideas` |
 | **LINT** | Health-check: staleness, orphans, broken links | `/pulse`, `/vault-audit`, `/reweave`, `/graph` |
 
@@ -91,7 +91,7 @@ A `pipeline.md` (hot, 7d) untouched for 10 days is **stale** (ratio 1.4). A `vis
 
 | Skill | Description |
 |-------|-------------|
-| **Ingest Data** | Process transcript backlog — categorize, extract, update modules |
+| **Ingest Data** | Process new sources — categorize, extract insights, update wiki modules |
 | **Pulse** | Vault health check — staleness radar, strategic questions, next steps |
 | **Brief** | Generate PDF brief or one-pager from vault knowledge |
 | **Log** | Close session — generate session log, commit changes |

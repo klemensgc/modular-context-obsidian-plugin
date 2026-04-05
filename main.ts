@@ -2478,7 +2478,7 @@ interface SkillDef {
 }
 
 const SKILLS: SkillDef[] = [
-  { id: "process-transcripts", label: "Ingest Data", description: "Process transcript backlog — categorize, extract, update modules", primary: true },
+  { id: "process-transcripts", label: "Ingest Data", description: "Process new sources — categorize, extract insights, update wiki modules", primary: true },
   { id: "pulse", label: "Pulse", description: "Vault health check — staleness radar, strategic questions, next steps", primary: true },
   { id: "brief", label: "Brief", description: "Generate PDF brief or one-pager from vault knowledge", primary: true },
   { id: "log", label: "Log", description: "Close session — generate session log, commit changes" },
