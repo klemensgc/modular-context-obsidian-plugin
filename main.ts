@@ -1662,6 +1662,7 @@ class TerminalView extends ItemView {
         const vaultPath = (this.app.vault.adapter as any).basePath as string;
         const session = new TerminalSession(this.sessionsEl, id, vaultPath, this.app);
         session.name = saved.name ?? `zsh ${id}`;
+        this.addSessionToolbar(session);
         this.sessions.push(session);
         session.hide();
       }
@@ -1669,6 +1670,17 @@ class TerminalView extends ItemView {
       const target = this.sessions.find((s) => s.id === state.activeId) ?? this.sessions[0];
       if (target) this.switchTo(target);
       this.renderTabs();
+
+      // Auto-resume: launch Claude Code in all restored sessions
+      const claudeCmd = this.autoMode
+        ? `claude --dangerously-skip-permissions -c\r`
+        : `claude -c\r`;
+      for (const session of this.sessions) {
+        setTimeout(() => {
+          session.process.stdin?.write(claudeCmd);
+        }, 500);
+        this.setupAutoName(session);
+      }
     }
     return super.setState(state, result);
   }
