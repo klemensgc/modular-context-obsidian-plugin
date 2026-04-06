@@ -1783,3 +1783,211 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
   opacity: 1;
   text-decoration: underline;
 }
+
+/* --- Onboarding Skill Picker --- */
+
+.mc-onboarding-skill-picker {
+  margin: 8px 0 16px;
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.mc-onboarding-skill-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.mc-onboarding-skill-row.is-master {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+  margin-bottom: 6px;
+}
+
+.mc-onboarding-skill-row input[type="checkbox"] {
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+
+.mc-onboarding-skill-row label {
+  font-size: 13px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.mc-onboarding-skill-size {
+  margin-left: 6px;
+  font-size: 11px;
+  opacity: 0.5;
+}
+
+.mc-onboarding-skill-category {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  opacity: 0.6;
+  margin-top: 10px;
+  margin-bottom: 2px;
+}
+
+.mc-onboarding-install-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.mc-onboarding-install-btn {
+  padding: 8px 20px;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.mc-onboarding-install-status {
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+.mc-onboarding-divider {
+  margin: 20px 0;
+  border: none;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.mc-onboarding-error {
+  color: var(--text-error);
+  font-size: 13px;
+}
+
+/* --- Skill Marketplace Modal --- */
+
+.mc-marketplace-modal {
+  max-width: 640px;
+}
+
+.mc-marketplace-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.mc-marketplace-header h3 {
+  margin: 0;
+}
+
+.mc-marketplace-updated {
+  font-size: 11px;
+  opacity: 0.5;
+}
+
+.mc-marketplace-filters {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.mc-marketplace-filter {
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  cursor: pointer;
+  background: var(--background-modifier-hover);
+  border: 1px solid transparent;
+}
+
+.mc-marketplace-filter.is-active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.mc-marketplace-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.mc-marketplace-card {
+  padding: 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+}
+
+.mc-marketplace-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.mc-marketplace-card-size {
+  font-size: 11px;
+  opacity: 0.5;
+}
+
+.mc-marketplace-badge {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--background-modifier-hover);
+  opacity: 0.7;
+}
+
+.mc-marketplace-card-desc {
+  font-size: 13px;
+  margin: 4px 0 8px;
+  opacity: 0.8;
+}
+
+.mc-marketplace-card-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.mc-marketplace-btn {
+  padding: 4px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.mc-marketplace-btn.is-installed {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.mc-marketplace-btn.is-install {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.mc-marketplace-btn.is-update {
+  background: var(--background-modifier-hover);
+}
+
+.mc-marketplace-footer {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.mc-marketplace-install-all {
+  padding: 8px 20px;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.mc-sidebar-library-btn {
+  cursor: pointer;
+}

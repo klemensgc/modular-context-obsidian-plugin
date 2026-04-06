@@ -1,4 +1,4 @@
-import { Plugin, ItemView, WorkspaceLeaf, App, TFile, setIcon, SuggestModal, Modal, Menu, addIcon, Setting, PluginSettingTab, Notice } from "obsidian";
+import { Plugin, ItemView, WorkspaceLeaf, App, TFile, setIcon, SuggestModal, Modal, Menu, addIcon, Setting, PluginSettingTab, Notice, requestUrl } from "obsidian";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import type { ChildProcess } from "child_process";
@@ -1824,6 +1824,15 @@ class TerminalView extends ItemView {
     addBtn.addEventListener("click", () => {
       this.showAddSkillInput(secondaryGrid, addBtn);
     });
+
+    // Skill Library button
+    const libraryBtn = secondaryGrid.createDiv({ cls: "mc-sidebar-skill-btn is-secondary mc-sidebar-library-btn" });
+    const libIcon = libraryBtn.createDiv({ cls: "mc-sidebar-skill-icon" });
+    setIcon(libIcon, "package");
+    libraryBtn.createSpan({ cls: "mc-sidebar-skill-label", text: "Library" });
+    libraryBtn.addEventListener("click", () => {
+      new SkillMarketplaceModal(this.app, this).open();
+    });
     const hiddenIds = (this as any).hiddenSkills ?? [];
     if (hiddenIds.length > 0) {
       const hiddenToggle = dashSection.createDiv({ cls: "mc-sidebar-hidden-toggle" });
@@ -2363,11 +2372,25 @@ class TerminalView extends ItemView {
     });
   }
 
-  launchSkill(skill: SkillDef) {
+  async launchSkill(skill: SkillDef) {
     if (skill.id === "start-here") {
       new OnboardingModal(this.app, this).open();
       return;
     }
+
+    // Auto-provision: install skill from registry if missing
+    const plugin = (this as any).plugin as TerminalPlugin | undefined;
+    if (plugin?.skillRegistry) {
+      const status = await plugin.skillRegistry.getSkillStatus(skill.id);
+      if (status === "not-installed") {
+        new Notice(`Installing skill: ${skill.label}...`);
+        const ok = await plugin.skillRegistry.installSkill(skill.id);
+        if (ok) {
+          new Notice(`Installed: ${skill.label}`);
+        }
+      }
+    }
+
     const session = this.createSession(skill.label);
     if (!session) return;
     this.tracker?.track(session, skill.id);
@@ -2730,6 +2753,116 @@ class OnboardingModal extends Modal {
       vaultList.createEl("li", { text: step });
     }
 
+    // Skill Library picker
+    contentEl.createEl("h4", { text: "Install skills" });
+    contentEl.createEl("p", {
+      text: "Skills are AI workflows you can launch from the sidebar. Select which ones to install:",
+      cls: "mc-onboarding-body",
+    });
+
+    const pickerEl = contentEl.createDiv({ cls: "mc-onboarding-skill-picker" });
+    const selectedSkills = new Set<string>();
+
+    // "Full Library" master checkbox
+    const masterRow = pickerEl.createDiv({ cls: "mc-onboarding-skill-row is-master" });
+    const masterCb = masterRow.createEl("input", { type: "checkbox" }) as HTMLInputElement;
+    masterCb.id = "mc-skill-master";
+    const masterLabel = masterRow.createEl("label");
+    masterLabel.htmlFor = "mc-skill-master";
+    masterLabel.createEl("strong", { text: "Full Modular Context Library" });
+    masterLabel.createSpan({ text: " — install all core skills" });
+
+    const skillCheckboxes: HTMLInputElement[] = [];
+
+    // Load registry and build checkboxes
+    const plugin = (this.view as any).plugin as TerminalPlugin | undefined;
+    const buildPicker = async () => {
+      const registry = await plugin?.skillRegistry?.fetchRegistry();
+      if (!registry) {
+        pickerEl.createEl("p", { text: "Could not load skill library. Check your internet connection.", cls: "mc-onboarding-error" });
+        return;
+      }
+
+      // Group by category
+      const categories = new Map<string, RegistrySkill[]>();
+      for (const skill of registry.skills) {
+        const cat = skill.category;
+        if (!categories.has(cat)) categories.set(cat, []);
+        categories.get(cat)!.push(skill);
+      }
+
+      for (const [category, skills] of categories) {
+        const catLabel = category.charAt(0).toUpperCase() + category.slice(1);
+        const catHeader = pickerEl.createDiv({ cls: "mc-onboarding-skill-category" });
+        catHeader.createSpan({ text: catLabel });
+
+        for (const skill of skills) {
+          const row = pickerEl.createDiv({ cls: "mc-onboarding-skill-row" });
+          const cb = row.createEl("input", { type: "checkbox" }) as HTMLInputElement;
+          cb.id = `mc-skill-${skill.id}`;
+          cb.dataset.skillId = skill.id;
+          if (skill.primary) {
+            cb.checked = true;
+            selectedSkills.add(skill.id);
+          }
+          const label = row.createEl("label");
+          label.htmlFor = cb.id;
+          label.createEl("strong", { text: skill.label });
+          label.createSpan({ text: ` — ${skill.description.split(".")[0]}` });
+          const sizeSpan = label.createSpan({ cls: "mc-onboarding-skill-size", text: skill.size });
+
+          cb.addEventListener("change", () => {
+            if (cb.checked) selectedSkills.add(skill.id);
+            else selectedSkills.delete(skill.id);
+            masterCb.checked = selectedSkills.size === registry.skills.length;
+          });
+
+          skillCheckboxes.push(cb);
+        }
+      }
+    };
+    buildPicker();
+
+    masterCb.addEventListener("change", () => {
+      for (const cb of skillCheckboxes) {
+        cb.checked = masterCb.checked;
+        const id = cb.dataset.skillId;
+        if (id) {
+          if (masterCb.checked) selectedSkills.add(id);
+          else selectedSkills.delete(id);
+        }
+      }
+    });
+
+    // Install button
+    const installRow = pickerEl.createDiv({ cls: "mc-onboarding-install-row" });
+    const installBtn = installRow.createEl("button", {
+      cls: "mc-onboarding-install-btn",
+      text: "Install Selected Skills",
+    });
+    const installStatus = installRow.createSpan({ cls: "mc-onboarding-install-status" });
+
+    installBtn.addEventListener("click", async () => {
+      if (selectedSkills.size === 0) {
+        new Notice("No skills selected.");
+        return;
+      }
+      installBtn.disabled = true;
+      installBtn.textContent = "Installing...";
+      const ids = [...selectedSkills];
+      const count = await plugin?.skillRegistry?.installMultiple(ids, (done, total) => {
+        installStatus.textContent = `${done}/${total}`;
+      }) ?? 0;
+      installBtn.textContent = `Installed ${count} skills ✓`;
+      installStatus.textContent = "";
+      new Notice(`Installed ${count} skills.`);
+      // Rebuild sidebar to show new skills
+      this.view.buildSidebar();
+    });
+
+    // Divider
+    contentEl.createEl("hr", { cls: "mc-onboarding-divider" });
+
     // CTA: Start Here onboarding session
     const cta = contentEl.createDiv({ cls: "mc-onboarding-cta" });
     const ctaBtn = cta.createEl("button", {
@@ -2938,6 +3071,129 @@ class OutputCaptureModal extends SuggestModal<CaptureOption> {
       }
       await this.app.vault.create(newPath, block.trimStart());
     }
+  }
+}
+
+// --- Skill Marketplace Modal ---
+
+class SkillMarketplaceModal extends Modal {
+  private view: TerminalView;
+
+  constructor(app: App, view: TerminalView) {
+    super(app);
+    this.view = view;
+  }
+
+  async onOpen() {
+    const { contentEl } = this;
+    contentEl.addClass("mc-marketplace-modal");
+
+    const header = contentEl.createDiv({ cls: "mc-marketplace-header" });
+    header.createEl("h3", { text: "Skill Library" });
+
+    const plugin = (this.view as any).plugin as TerminalPlugin | undefined;
+    const registry = await plugin?.skillRegistry?.fetchRegistry();
+
+    if (!registry) {
+      contentEl.createEl("p", { text: "Could not load skill library. Check your internet connection." });
+      return;
+    }
+
+    header.createSpan({ cls: "mc-marketplace-updated", text: `Updated: ${registry.updated}` });
+
+    // Category filter
+    const allCategories = [...new Set(registry.skills.map(s => s.category))];
+    const filterRow = contentEl.createDiv({ cls: "mc-marketplace-filters" });
+    let activeFilter = "all";
+
+    const allBtn = filterRow.createEl("button", { cls: "mc-marketplace-filter is-active", text: "All" });
+    allBtn.addEventListener("click", () => { activeFilter = "all"; renderSkills(); setActiveFilter(allBtn); });
+
+    const filterBtns = [allBtn];
+    for (const cat of allCategories) {
+      const btn = filterRow.createEl("button", {
+        cls: "mc-marketplace-filter",
+        text: cat.charAt(0).toUpperCase() + cat.slice(1),
+      });
+      btn.addEventListener("click", () => { activeFilter = cat; renderSkills(); setActiveFilter(btn); });
+      filterBtns.push(btn);
+    }
+
+    const setActiveFilter = (active: HTMLElement) => {
+      filterBtns.forEach(b => b.classList.remove("is-active"));
+      active.classList.add("is-active");
+    };
+
+    // Skill grid
+    const gridEl = contentEl.createDiv({ cls: "mc-marketplace-grid" });
+
+    const renderSkills = async () => {
+      gridEl.empty();
+      const filtered = activeFilter === "all"
+        ? registry.skills
+        : registry.skills.filter(s => s.category === activeFilter);
+
+      for (const skill of filtered) {
+        const card = gridEl.createDiv({ cls: "mc-marketplace-card" });
+        const cardHeader = card.createDiv({ cls: "mc-marketplace-card-header" });
+        cardHeader.createEl("strong", { text: skill.label });
+        cardHeader.createSpan({ cls: "mc-marketplace-card-size", text: skill.size });
+
+        const catBadge = card.createSpan({ cls: `mc-marketplace-badge mc-cat-${skill.category}` });
+        catBadge.textContent = skill.category;
+
+        card.createEl("p", { cls: "mc-marketplace-card-desc", text: skill.description.split(".")[0] + "." });
+
+        const actions = card.createDiv({ cls: "mc-marketplace-card-actions" });
+        const status = await plugin?.skillRegistry?.getSkillStatus(skill.id) ?? "not-installed";
+
+        if (status === "installed") {
+          const btn = actions.createEl("button", { cls: "mc-marketplace-btn is-installed", text: "Installed ✓" });
+          btn.disabled = true;
+        } else if (status === "update-available") {
+          const btn = actions.createEl("button", { cls: "mc-marketplace-btn is-update", text: "Update" });
+          btn.addEventListener("click", async () => {
+            const modified = await plugin?.skillRegistry?.isModifiedLocally(skill.id);
+            if (modified) {
+              new Notice(`"${skill.label}" has local changes. Update skipped to protect your edits.`);
+              return;
+            }
+            btn.disabled = true;
+            btn.textContent = "Updating...";
+            const ok = await plugin?.skillRegistry?.installSkill(skill.id);
+            btn.textContent = ok ? "Updated ✓" : "Failed";
+          });
+        } else {
+          const btn = actions.createEl("button", { cls: "mc-marketplace-btn is-install", text: "Install" });
+          btn.addEventListener("click", async () => {
+            btn.disabled = true;
+            btn.textContent = "Installing...";
+            const ok = await plugin?.skillRegistry?.installSkill(skill.id);
+            btn.textContent = ok ? "Installed ✓" : "Failed";
+            if (ok) {
+              new Notice(`Installed: ${skill.label}`);
+              this.view.buildSidebar();
+            }
+          });
+        }
+      }
+    };
+
+    renderSkills();
+
+    // Install All button
+    const footer = contentEl.createDiv({ cls: "mc-marketplace-footer" });
+    const installAllBtn = footer.createEl("button", { cls: "mc-marketplace-install-all", text: "Install All" });
+    installAllBtn.addEventListener("click", async () => {
+      installAllBtn.disabled = true;
+      installAllBtn.textContent = "Installing...";
+      const ids = registry.skills.map(s => s.id);
+      const count = await plugin?.skillRegistry?.installMultiple(ids) ?? 0;
+      installAllBtn.textContent = `Installed ${count} skills ✓`;
+      new Notice(`Installed ${count} skills.`);
+      this.view.buildSidebar();
+      renderSkills(); // Refresh status
+    });
   }
 }
 
@@ -3281,10 +3537,234 @@ class MCSettingTab extends PluginSettingTab {
   }
 }
 
+// --- Skill Registry ---
+
+const SKILL_REGISTRY_URL = "https://raw.githubusercontent.com/klemensgc/modular-context-skills/main/registry.json";
+const SKILL_BASE_URL = "https://raw.githubusercontent.com/klemensgc/modular-context-skills/main/";
+
+interface RegistrySkill {
+  id: string;
+  label: string;
+  description: string;
+  version: string;
+  category: string;
+  tier: string;
+  files: string[];
+  size: string;
+  primary?: boolean;
+  type?: string; // "command" for .claude/commands/ items
+}
+
+interface RegistryData {
+  version: string;
+  updated: string;
+  source: string;
+  skills: RegistrySkill[];
+}
+
+interface InstalledSkillInfo {
+  version: string;
+  installedAt: string;
+  modified: boolean;
+  contentHash?: string;
+}
+
+class SkillRegistry {
+  private app: App;
+  private plugin: TerminalPlugin;
+  private cache: RegistryData | null = null;
+
+  constructor(app: App, plugin: TerminalPlugin) {
+    this.app = app;
+    this.plugin = plugin;
+  }
+
+  async fetchRegistry(force = false): Promise<RegistryData | null> {
+    if (this.cache && !force) return this.cache;
+
+    // Try cached data from plugin storage first
+    const pluginData = await this.plugin.loadData() ?? {};
+    const cachedAt = pluginData.registryCachedAt;
+    const now = Date.now();
+    // Use cache if less than 1 hour old and not forced
+    if (!force && cachedAt && (now - new Date(cachedAt).getTime()) < 3600000 && pluginData.registryCache) {
+      this.cache = pluginData.registryCache;
+      return this.cache;
+    }
+
+    try {
+      const response = await requestUrl({ url: SKILL_REGISTRY_URL });
+      if (response.status === 200) {
+        this.cache = response.json as RegistryData;
+        // Persist cache
+        pluginData.registryCache = this.cache;
+        pluginData.registryCachedAt = new Date().toISOString();
+        await this.plugin.saveData(pluginData);
+        return this.cache;
+      }
+    } catch (e) {
+      console.warn("[mc] Failed to fetch skill registry:", e);
+      // Fall back to persisted cache
+      if (pluginData.registryCache) {
+        this.cache = pluginData.registryCache;
+        return this.cache;
+      }
+    }
+    return null;
+  }
+
+  async getSkillStatus(skillId: string): Promise<"not-installed" | "installed" | "update-available"> {
+    const adapter = this.app.vault.adapter;
+    const isCommand = await this.isCommandType(skillId);
+    const path = isCommand
+      ? `.claude/commands/${skillId}.md`
+      : `.claude/skills/${skillId}/SKILL.md`;
+    const exists = await adapter.exists(path);
+    if (!exists) return "not-installed";
+
+    const registry = await this.fetchRegistry();
+    if (!registry) return "installed";
+
+    const pluginData = await this.plugin.loadData() ?? {};
+    const installed = pluginData.installedSkills?.[skillId] as InstalledSkillInfo | undefined;
+    if (!installed) return "installed"; // Installed but not tracked by us
+
+    const regSkill = registry.skills.find(s => s.id === skillId);
+    if (regSkill && regSkill.version !== installed.version) return "update-available";
+
+    return "installed";
+  }
+
+  private async isCommandType(skillId: string): Promise<boolean> {
+    const registry = await this.fetchRegistry();
+    if (!registry) return false;
+    const skill = registry.skills.find(s => s.id === skillId);
+    return skill?.type === "command";
+  }
+
+  private simpleHash(str: string): string {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const ch = str.charCodeAt(i);
+      hash = ((hash << 5) - hash) + ch;
+      hash |= 0;
+    }
+    return hash.toString(36);
+  }
+
+  async isModifiedLocally(skillId: string): Promise<boolean> {
+    const pluginData = await this.plugin.loadData() ?? {};
+    const installed = pluginData.installedSkills?.[skillId] as InstalledSkillInfo | undefined;
+    if (!installed?.contentHash) return false; // Can't tell, assume not modified
+
+    const adapter = this.app.vault.adapter;
+    const isCommand = installed ? await this.isCommandType(skillId) : false;
+    const path = isCommand
+      ? `.claude/commands/${skillId}.md`
+      : `.claude/skills/${skillId}/SKILL.md`;
+
+    try {
+      const content = await adapter.read(path);
+      const currentHash = this.simpleHash(content);
+      return currentHash !== installed.contentHash;
+    } catch {
+      return false;
+    }
+  }
+
+  async installSkill(skillId: string): Promise<boolean> {
+    const registry = await this.fetchRegistry();
+    if (!registry) {
+      new Notice("Cannot fetch skill registry. Check your internet connection.");
+      return false;
+    }
+
+    const regSkill = registry.skills.find(s => s.id === skillId);
+    if (!regSkill) {
+      new Notice(`Skill "${skillId}" not found in registry.`);
+      return false;
+    }
+
+    const adapter = this.app.vault.adapter;
+    const isCommand = regSkill.type === "command";
+    const tierPath = regSkill.tier === "community" ? "community" : "core";
+
+    try {
+      if (isCommand) {
+        // Commands go to .claude/commands/
+        await this.ensureDir(".claude/commands");
+        const url = `${SKILL_BASE_URL}${tierPath}/${skillId}/COMMAND.md`;
+        const resp = await requestUrl({ url });
+        const destPath = `.claude/commands/${skillId}.md`;
+        await adapter.write(destPath, resp.text);
+
+        // Track installation
+        await this.trackInstall(skillId, regSkill.version, this.simpleHash(resp.text));
+      } else {
+        // Skills go to .claude/skills/{id}/
+        const skillDir = `.claude/skills/${skillId}`;
+        await this.ensureDir(skillDir);
+
+        for (const file of regSkill.files) {
+          const url = `${SKILL_BASE_URL}${tierPath}/${skillId}/${file}`;
+          const resp = await requestUrl({ url });
+          const destPath = `${skillDir}/${file}`;
+          // Ensure subdirs exist (e.g., references/)
+          const lastSlash = destPath.lastIndexOf("/");
+          if (lastSlash > skillDir.length) {
+            await this.ensureDir(destPath.substring(0, lastSlash));
+          }
+          await adapter.write(destPath, resp.text);
+        }
+
+        // Track installation with hash of main SKILL.md
+        const mainContent = await adapter.read(`${skillDir}/SKILL.md`);
+        await this.trackInstall(skillId, regSkill.version, this.simpleHash(mainContent));
+      }
+
+      return true;
+    } catch (e) {
+      console.error(`[mc] Failed to install skill ${skillId}:`, e);
+      new Notice(`Failed to install "${regSkill.label}". Check console for details.`);
+      return false;
+    }
+  }
+
+  async installMultiple(skillIds: string[], onProgress?: (done: number, total: number) => void): Promise<number> {
+    let installed = 0;
+    for (let i = 0; i < skillIds.length; i++) {
+      const ok = await this.installSkill(skillIds[i]);
+      if (ok) installed++;
+      onProgress?.(i + 1, skillIds.length);
+    }
+    return installed;
+  }
+
+  private async ensureDir(path: string) {
+    const adapter = this.app.vault.adapter;
+    if (!(await adapter.exists(path))) {
+      await adapter.mkdir(path);
+    }
+  }
+
+  private async trackInstall(skillId: string, version: string, contentHash: string) {
+    const pluginData = await this.plugin.loadData() ?? {};
+    if (!pluginData.installedSkills) pluginData.installedSkills = {};
+    pluginData.installedSkills[skillId] = {
+      version,
+      installedAt: new Date().toISOString().split("T")[0],
+      modified: false,
+      contentHash,
+    } as InstalledSkillInfo;
+    await this.plugin.saveData(pluginData);
+  }
+}
+
 // --- Plugin ---
 
 export default class TerminalPlugin extends Plugin {
   agentTracker!: AgentTracker;
+  skillRegistry!: SkillRegistry;
   async onload() {
     // Ensure pty-helper.py exists in the plugin directory.
     // BRAT and Obsidian's plugin installer only copy main.js, manifest.json,
@@ -3300,6 +3780,9 @@ export default class TerminalPlugin extends Plugin {
       console.error("[modular-context] Failed to write pty-helper.py:", e);
       new Notice("Modular Context: Failed to write terminal helper. Check console.");
     }
+
+    // Skill registry — fetches and installs skills from GitHub
+    this.skillRegistry = new SkillRegistry(this.app, this);
 
     // Agent tracker — notifies terminal views to re-render sidebar
     this.agentTracker = new AgentTracker(() => {
