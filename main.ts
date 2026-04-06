@@ -1114,7 +1114,7 @@ class TerminalSession {
 
 // --- FullscreenManager ---
 
-type FullscreenLayout = "single" | "split-h" | "split-v" | "grid";
+type FullscreenLayout = "single" | "split-h" | "split-v" | "grid" | "grid-6" | "grid-8";
 
 interface SavedPosition {
   parent: HTMLElement;
@@ -1399,7 +1399,9 @@ class FullscreenManager {
       { key: "single", label: "Single", svg: '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/></svg>' },
       { key: "split-h", label: "Side by side", svg: '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/></svg>' },
       { key: "split-v", label: "Stacked", svg: '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="1" y1="6" x2="11" y2="6"/></svg>' },
-      { key: "grid", label: "Grid", svg: '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="6" x2="11" y2="6"/></svg>' },
+      { key: "grid", label: "Grid 2×2", svg: '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="6" x2="11" y2="6"/></svg>' },
+      { key: "grid-6", label: "Grid 2×3", svg: '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="4.3" x2="11" y2="4.3"/><line x1="1" y1="7.7" x2="11" y2="7.7"/></svg>' },
+      { key: "grid-8", label: "Grid 2×4", svg: '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="3.5" x2="11" y2="3.5"/><line x1="1" y1="6" x2="11" y2="6"/><line x1="1" y1="8.5" x2="11" y2="8.5"/></svg>' },
     ];
 
     for (const l of layouts) {
@@ -1532,23 +1534,23 @@ class FullscreenManager {
     const all = this.view.sessions;
     if (all.length === 0) return [];
 
-    switch (this.layout) {
-      case "single":
-        return this.focusedSession && all.includes(this.focusedSession)
-          ? [this.focusedSession]
-          : [all[0]];
-      case "split-h":
-      case "split-v":
-        if (all.length === 1) return [all[0]];
-        if (this.focusedSession) {
-          const idx = all.indexOf(this.focusedSession);
-          const other = all[(idx + 1) % all.length];
-          return this.focusedSession === other ? [this.focusedSession] : [this.focusedSession, other];
-        }
-        return all.slice(0, 2);
-      case "grid":
-        return [...all];
+    const maxPanes: Record<string, number> = {
+      "single": 1, "split-h": 2, "split-v": 2,
+      "grid": 4, "grid-6": 6, "grid-8": 8,
+    };
+    const slots = maxPanes[this.layout] ?? 4;
+
+    if (slots <= 1) {
+      return this.focusedSession && all.includes(this.focusedSession)
+        ? [this.focusedSession] : [all[0]];
     }
+
+    const visible = all.slice(0, Math.min(slots, all.length));
+    // Guarantee focused session is visible
+    if (this.focusedSession && !visible.includes(this.focusedSession) && all.includes(this.focusedSession)) {
+      visible[visible.length - 1] = this.focusedSession;
+    }
+    return visible;
   }
 
   private fitAllVisible() {
@@ -1654,7 +1656,7 @@ class TerminalView extends ItemView {
   tracker: AgentTracker | null = null;
   autoMode = false;
   private sidebarDirty = true;
-  inlineLayout: "single" | "split-h" | "split-v" | "grid" = "single";
+  inlineLayout: FullscreenLayout = "single";
   private visibleSessions: TerminalSession[] = [];
   customSkills: SkillDef[] = [];
   standbyEl!: HTMLElement;
@@ -1902,7 +1904,9 @@ class TerminalView extends ItemView {
       { key: "single", label: "Single", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/></svg>' },
       { key: "split-h", label: "Side by side", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/></svg>' },
       { key: "split-v", label: "Stacked", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="1" y1="6" x2="11" y2="6"/></svg>' },
-      { key: "grid", label: "Grid", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="6" x2="11" y2="6"/></svg>' },
+      { key: "grid", label: "Grid 2×2", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="6" x2="11" y2="6"/></svg>' },
+      { key: "grid-6", label: "Grid 2×3", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="4.3" x2="11" y2="4.3"/><line x1="1" y1="7.7" x2="11" y2="7.7"/></svg>' },
+      { key: "grid-8", label: "Grid 2×4", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="3.5" x2="11" y2="3.5"/><line x1="1" y1="6" x2="11" y2="6"/><line x1="1" y1="8.5" x2="11" y2="8.5"/></svg>' },
     ];
     for (const l of layouts) {
       const btn = layoutGroup.createEl("button", { cls: "mc-sidebar-layout-btn" });
@@ -2242,7 +2246,7 @@ class TerminalView extends ItemView {
   }
 
   /** Apply inline layout — show multiple sessions in CSS grid */
-  setInlineLayout(layout: "single" | "split-h" | "split-v" | "grid") {
+  setInlineLayout(layout: FullscreenLayout) {
     this.inlineLayout = layout;
     this.sessionsEl.dataset.layout = layout;
 
@@ -2289,24 +2293,23 @@ class TerminalView extends ItemView {
     let visible: TerminalSession[];
     const activeIdx = this.activeSession ? all.indexOf(this.activeSession) : 0;
 
-    switch (this.inlineLayout) {
-      case "split-h":
-      case "split-v": {
-        if (all.length <= 1) {
-          visible = [...all];
-        } else {
-          const other = all[(activeIdx + 1) % all.length];
-          visible = this.activeSession
-            ? (this.activeSession === other ? [this.activeSession] : [this.activeSession, other])
-            : all.slice(0, 2);
-        }
-        break;
+    // How many panes this layout supports
+    const maxPanes: Record<string, number> = {
+      "single": 1, "split-h": 2, "split-v": 2,
+      "grid": 4, "grid-6": 6, "grid-8": 8,
+    };
+    const slots = maxPanes[this.inlineLayout] ?? 2;
+
+    if (slots <= 1 || all.length <= 1) {
+      visible = this.activeSession && all.includes(this.activeSession)
+        ? [this.activeSession] : all.slice(0, 1);
+    } else {
+      // Start with first N sessions
+      visible = all.slice(0, Math.min(slots, all.length));
+      // Guarantee activeSession is visible — swap it in if missing
+      if (this.activeSession && !visible.includes(this.activeSession)) {
+        visible[visible.length - 1] = this.activeSession;
       }
-      case "grid":
-        visible = all.slice(0, 4);
-        break;
-      default:
-        visible = this.activeSession ? [this.activeSession] : all.slice(0, 1);
     }
 
     this.visibleSessions = visible;
@@ -2586,12 +2589,22 @@ class TerminalView extends ItemView {
 
   switchTo(session: TerminalSession) {
     if (session === this.activeSession) return;
+
     if (this.inlineLayout === "single") {
-      if (this.activeSession) this.activeSession.hide();
-      this.activeSession = session;
-      session.show(this.isRenaming);
+      // Auto-split: if multiple sessions exist, switch to split-h
+      if (this.sessions.length > 1) {
+        this.activeSession = session;
+        this.inlineLayout = "split-h";
+        this.sessionsEl.dataset.layout = "split-h";
+        this.sessionsEl.classList.add("mc-multi-pane");
+        this.rebuildInlinePanes();
+      } else {
+        if (this.activeSession) this.activeSession.hide();
+        this.activeSession = session;
+        session.show(this.isRenaming);
+      }
     } else {
-      // Multi-pane: just change active focus, rebuild panes if needed
+      // Multi-pane: set active, rebuild if session not visible
       this.activeSession = session;
       if (!this.visibleSessions.includes(session)) {
         this.rebuildInlinePanes();
