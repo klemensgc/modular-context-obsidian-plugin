@@ -92,6 +92,21 @@ if __name__ == "__main__":
 // Build an xterm.js ITheme from Obsidian's CSS variables at runtime.
 // ANSI colors use sensible defaults that adapt to light/dark mode.
 
+/** Check if a captured ❯ input line makes a good auto-generated session name */
+function isGoodAutoName(input: string): boolean {
+  if (input.length < 4) return false;
+  if (input === "claude" || input.startsWith("claude ")) return false;
+  if (/^\d+\.\s/.test(input)) return false;
+  if (/^\d+$/.test(input)) return false;
+  const ephemeral = new Set([
+    "yes", "no", "y", "n", "ok", "okay", "sure", "done",
+    "exit", "quit", "help", "retry", "skip", "cancel",
+    "resume", "res", "continue", "cont",
+  ]);
+  if (ephemeral.has(input.toLowerCase())) return false;
+  return true;
+}
+
 function getObsidianTheme(): Record<string, string> {
   const s = getComputedStyle(document.body);
   const get = (v: string) => s.getPropertyValue(v).trim();
@@ -1435,7 +1450,15 @@ class FullscreenManager {
       this.isRenaming = false;
       if (save) {
         const name = input.value.trim();
-        if (name) session.name = name;
+        if (name) {
+          session.name = name;
+          (session as any)._autoNameLocked = true;
+          if ((session as any)._autoNameInterval) {
+            clearInterval((session as any)._autoNameInterval);
+            (session as any)._autoNameInterval = null;
+          }
+        }
+        if ((session as any)._toolbarNameEl) (session as any)._toolbarNameEl.textContent = name;
       }
       this.renderFsTabs();
       this.rebuildPanes();
@@ -1662,6 +1685,7 @@ class TerminalView extends ItemView {
         const vaultPath = (this.app.vault.adapter as any).basePath as string;
         const session = new TerminalSession(this.sessionsEl, id, vaultPath, this.app);
         session.name = saved.name ?? `zsh ${id}`;
+        (session as any)._autoNameLocked = true;
         this.addSessionToolbar(session);
         this.sessions.push(session);
         session.hide();
@@ -1679,7 +1703,7 @@ class TerminalView extends ItemView {
         setTimeout(() => {
           session.process.stdin?.write(claudeCmd);
         }, 500);
-        this.setupAutoName(session);
+        // No setupAutoName — restored sessions already have names
       }
     }
     return super.setState(state, result);
@@ -2344,7 +2368,7 @@ class TerminalView extends ItemView {
       new OnboardingModal(this.app, this).open();
       return;
     }
-    const session = this.createSession(skill.id);
+    const session = this.createSession(skill.label);
     if (!session) return;
     this.tracker?.track(session, skill.id);
     const claudeCmd = this.autoMode
@@ -2397,8 +2421,15 @@ class TerminalView extends ItemView {
       this.isRenaming = false;
       if (save) {
         const name = input.value.trim();
-        if (name) session.name = name;
-          if ((session as any)._toolbarNameEl) (session as any)._toolbarNameEl.textContent = name;
+        if (name) {
+          session.name = name;
+          (session as any)._autoNameLocked = true;
+          if ((session as any)._autoNameInterval) {
+            clearInterval((session as any)._autoNameInterval);
+            (session as any)._autoNameInterval = null;
+          }
+        }
+        if ((session as any)._toolbarNameEl) (session as any)._toolbarNameEl.textContent = name;
       }
       this.renderSidebarCards();
       this.saveState();
@@ -2415,25 +2446,28 @@ class TerminalView extends ItemView {
   }
 
   private setupAutoName(session: TerminalSession) {
+    if ((session as any)._autoNameLocked) return;
     let done = false;
     const check = () => {
       if (done) return;
+      if ((session as any)._autoNameLocked) {
+        done = true; clearInterval(interval); return;
+      }
       const buf = session.terminal.buffer.active;
       for (let i = buf.length - 1; i >= Math.max(0, buf.length - 40); i--) {
         const line = buf.getLine(i)?.translateToString(true)?.trim();
         if (!line) continue;
         if (/^❯\s+.+/.test(line)) {
           const input = line.replace(/^❯\s+/, "").trim();
-          if (input.length > 2 && input !== "claude" && !input.startsWith("claude ")) {
-            done = true;
-            clearInterval(interval);
-            const newName = input.startsWith("/") ? input.slice(1) : (input.length > 35 ? input.slice(0, 35) + "…" : input);
-            session.name = newName;
-            if ((session as any)._toolbarNameEl) (session as any)._toolbarNameEl.textContent = newName;
-            this.renderSidebarCards();
-            this.saveState();
-            return;
-          }
+          if (!isGoodAutoName(input)) continue;
+          done = true;
+          clearInterval(interval);
+          const newName = input.startsWith("/") ? input.slice(1) : (input.length > 35 ? input.slice(0, 35) + "…" : input);
+          session.name = newName;
+          if ((session as any)._toolbarNameEl) (session as any)._toolbarNameEl.textContent = newName;
+          this.renderSidebarCards();
+          this.saveState();
+          return;
         }
       }
     };
@@ -2463,6 +2497,11 @@ class TerminalView extends ItemView {
           if (val) {
             session.name = val;
             nameEl.textContent = val;
+            (session as any)._autoNameLocked = true;
+            if ((session as any)._autoNameInterval) {
+              clearInterval((session as any)._autoNameInterval);
+              (session as any)._autoNameInterval = null;
+            }
           }
         }
         input.replaceWith(nameEl);
@@ -2501,7 +2540,10 @@ class TerminalView extends ItemView {
       const id = this.nextId++;
       const vaultPath = (this.app.vault.adapter as any).basePath as string;
       const session = new TerminalSession(this.sessionsEl, id, vaultPath, this.app);
-      if (name) session.name = name;
+      if (name) {
+        session.name = name;
+        (session as any)._autoNameLocked = true;
+      }
       this.addSessionToolbar(session);
       this.setupAutoName(session);
       this.sessions.push(session);
