@@ -737,6 +737,7 @@ class TerminalSession {
   private autocomplete: WikiLinkAutocomplete | null = null;
   private bookmarkManager: BookmarkManager | null = null;
   hasActivity = false;
+  destroyed = false;
   _lastStdoutAt = 0;
   private _activityCallback: ((session: TerminalSession) => void) | null = null;
   setActivityCallback(cb: ((session: TerminalSession) => void) | null) {
@@ -1100,6 +1101,17 @@ class TerminalSession {
   clearBookmarks() { this.bookmarkManager?.clearAll(); }
 
   destroy() {
+    // Mark destroyed FIRST so any callback that slips through bails out
+    this.destroyed = true;
+
+    // Detach all process listeners BEFORE kill+dispose. process.kill() is
+    // async — without this, the exit/data events fire after terminal.dispose()
+    // and `terminal.write()` throws on a disposed terminal, crashing Obsidian.
+    try { this.process.stdout?.removeAllListeners("data"); } catch {}
+    try { this.process.stderr?.removeAllListeners("data"); } catch {}
+    try { this.process.removeAllListeners("exit"); } catch {}
+    try { this.process.removeAllListeners("error"); } catch {}
+
     this.bookmarkManager?.destroy();
     this.autocomplete?.destroy();
     try {
@@ -1107,7 +1119,7 @@ class TerminalSession {
     } catch {
       // Already dead
     }
-    this.terminal.dispose();
+    try { this.terminal.dispose(); } catch {}
     this.containerEl.remove();
   }
 }
@@ -1116,26 +1128,47 @@ class TerminalSession {
 
 type FullscreenLayout = "single" | "split-h" | "split-v" | "grid" | "grid-6" | "grid-8";
 
-interface SavedPosition {
-  parent: HTMLElement;
-  nextSibling: Node | null;
+/** Number of pane slots for each layout. Used by computeVisible() and renderLayout(). */
+const SLOT_COUNT: Record<FullscreenLayout, number> = {
+  "single": 1,
+  "split-h": 2,
+  "split-v": 2,
+  "grid": 4,
+  "grid-6": 6,
+  "grid-8": 8,
+};
+
+/** Display mode is the single source of truth for "what mode + which layout".
+ *  Owned by TerminalView. FullscreenManager reads from view, never writes its own. */
+interface DisplayMode {
+  kind: "inline" | "fullscreen";
+  layout: FullscreenLayout;
 }
 
 class FullscreenManager {
   private static overlayOpen = false;
 
   private view: TerminalView;
-  private overlay: HTMLElement | null = null;
-  private tabBarEl: HTMLElement | null = null;
-  private gridEl: HTMLElement | null = null;
-  private savedPositions = new Map<TerminalSession, SavedPosition>();
+  overlay: HTMLElement | null = null;
+  tabBarEl: HTMLElement | null = null;
+  /** Public so view.renderLayout() can target it directly when fullscreen is active. */
+  gridEl: HTMLElement | null = null;
   private savedSidebarParent: HTMLElement | null = null;
   private savedSidebarNextSibling: Node | null = null;
-  private layout: FullscreenLayout = "single";
-  private focusedSession: TerminalSession | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private resizeTimer: ReturnType<typeof setTimeout> | null = null;
   private isRenaming = false;
+
+  /** focusedSession delegates to view.activeSession — no independent state. */
+  get focusedSession(): TerminalSession | null { return this.view.activeSession; }
+  set focusedSession(s: TerminalSession | null) {
+    if (s && this.view.sessions.includes(s)) this.view.activeSession = s;
+    else this.view.activeSession = null;
+  }
+
+  /** layout delegates to view.displayMode.layout — no independent state. */
+  get layout(): FullscreenLayout { return this.view.displayMode.layout; }
+  set layout(l: FullscreenLayout) { this.view.displayMode.layout = l; }
 
   constructor(view: TerminalView) {
     this.view = view;
@@ -1158,28 +1191,28 @@ class FullscreenManager {
     if (this.view.sessions.length === 0) return;
 
     FullscreenManager.overlayOpen = true;
-    if (layout) this.layout = layout;
 
-    // Always sync focused session from the view's current active session
-    this.focusedSession = this.view.activeSession ?? this.view.sessions[0];
+    // Resolve layout: explicit > view's current > "single"
+    const resolvedLayout = layout ?? this.view.displayMode.layout ?? "single";
+    this.layout = resolvedLayout;  // legacy field, until Iter 10
 
-    // Build overlay DOM
+    // Build overlay DOM (shell only — view.renderLayout populates panes)
     this.overlay = document.createElement("div");
     this.overlay.className = "mc-fullscreen-overlay";
 
-    // Grid container
     this.gridEl = document.createElement("div");
     this.gridEl.className = "mc-fullscreen-grid";
-    this.gridEl.dataset.layout = this.layout;
+    this.gridEl.dataset.mode = "fullscreen";
+    this.gridEl.dataset.layout = resolvedLayout;
     this.overlay.appendChild(this.gridEl);
 
-    // Move the existing sidebar into the overlay (keeps same UI)
+    // Move the existing sidebar into the overlay
     const sidebar = this.view.sidebarEl;
     this.savedSidebarParent = sidebar.parentElement;
     this.savedSidebarNextSibling = sidebar.nextSibling;
     this.overlay.appendChild(sidebar);
 
-    // Hidden tab bar ref (needed for compatibility but not rendered)
+    // Hidden tab bar ref (compat)
     this.tabBarEl = document.createElement("div");
 
     // Stop keyboard events from bubbling to Obsidian
@@ -1202,14 +1235,14 @@ class FullscreenManager {
       }
     });
 
-    // Save positions and move sessions into panes
-    this.saveAndMoveAll();
-
-    // Set up activity detection on all sessions
-    this.setupActivityCallbacks();
-
-    // Append to body
     document.body.appendChild(this.overlay);
+
+    // KEY: switch view's displayMode → renderLayout() reparents sessions to gridEl
+    this.view.displayMode = { kind: "fullscreen", layout: resolvedLayout };
+    this.view.fs = this;
+    this.view.renderLayout();
+    this.renderFsTabs();
+    this.setupActivityCallbacks();
 
     // Animate in
     requestAnimationFrame(() => this.overlay?.classList.add("is-visible"));
@@ -1217,12 +1250,11 @@ class FullscreenManager {
     // ResizeObserver on grid
     this.resizeObserver = new ResizeObserver(() => {
       if (this.resizeTimer) clearTimeout(this.resizeTimer);
-      this.resizeTimer = setTimeout(() => this.fitAllVisible(), 60);
+      this.resizeTimer = setTimeout(() => {
+        for (const s of this.view.computeVisible(this.view.displayMode.layout)) s.fit();
+      }, 60);
     });
     this.resizeObserver.observe(this.gridEl);
-
-    // Fit after layout settles
-    setTimeout(() => this.fitAllVisible(), 100);
   }
 
   exit() {
@@ -1236,7 +1268,7 @@ class FullscreenManager {
     const overlay = this.overlay;
     setTimeout(() => overlay.remove(), 150);
 
-    // Restore sidebar to its original position BEFORE removing overlay
+    // Restore sidebar to its original position BEFORE clearing refs
     const sidebar = this.view.sidebarEl;
     if (this.savedSidebarParent) {
       if (this.savedSidebarNextSibling && this.savedSidebarNextSibling.parentNode === this.savedSidebarParent) {
@@ -1248,37 +1280,31 @@ class FullscreenManager {
     this.savedSidebarParent = null;
     this.savedSidebarNextSibling = null;
 
-    // Clear refs immediately so re-entry works
+    // Park all sessions before tearing down gridEl, so renderLayout() in inline
+    // mode can find them and rebuild fresh panes inside sessionsEl.
+    for (const s of this.view.sessions) {
+      this.view.parkingEl.appendChild(s.containerEl);
+    }
+
+    // Clear activity callbacks BEFORE clearing refs
+    this.clearActivityCallbacks();
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
+    if (this.resizeTimer) clearTimeout(this.resizeTimer);
+
+    // Clear refs
     this.overlay = null;
     this.tabBarEl = null;
     this.gridEl = null;
     FullscreenManager.overlayOpen = false;
 
-    // Clear activity callbacks
-    this.clearActivityCallbacks();
-
-    // Restore sessions to their original containers
-    try {
-      this.restoreAll();
-    } catch (e) {
-      console.error("[modular-context] restoreAll error:", e);
-    }
-
-    // Clean up observer
-    this.resizeObserver?.disconnect();
-    this.resizeObserver = null;
-    if (this.resizeTimer) clearTimeout(this.resizeTimer);
-
-    // Sync active session back to view
-    // Force switchTo by clearing activeSession first
-    const target = (this.focusedSession && this.view.sessions.includes(this.focusedSession))
-      ? this.focusedSession
-      : this.view.sessions[0] || null;
-    this.view.activeSession = null;
-    if (target) this.view.switchTo(target);
+    // Switch view back to inline; renderLayout() rebuilds panes in sessionsEl
+    const preservedLayout = this.view.displayMode.layout;
+    this.view.displayMode = { kind: "inline", layout: preservedLayout };
+    this.view.fs = null;
+    this.view.renderLayout();
     this.view.renderTabs();
 
-    // Refit after DOM settles
     requestAnimationFrame(() => {
       this.view.activeSession?.fit();
       this.view.activeSession?.focus();
@@ -1286,33 +1312,14 @@ class FullscreenManager {
   }
 
   setLayout(layout: FullscreenLayout) {
-    if (layout === this.layout && this.gridEl) return;
-    this.layout = layout;
-    if (this.gridEl) this.gridEl.dataset.layout = layout;
+    // Delegate to view — single source of truth
+    this.layout = layout;  // legacy field, kept in sync until Iter 10
+    this.view.setLayout(layout);
     this.renderFsTabs();
-    this.rebuildPanes();
-  }
-
-  private saveAndMoveAll() {
-    this.savedPositions.clear();
-
-    // Save original DOM positions for ALL sessions so we can restore them on exit
-    for (const session of this.view.sessions) {
-      const parent = session.containerEl.parentElement;
-      if (parent) {
-        this.savedPositions.set(session, {
-          parent,
-          nextSibling: session.containerEl.nextSibling,
-        });
-      }
-    }
-
-    this.renderFsTabs();
-    this.rebuildPanes();
   }
 
   /** Render the fullscreen tab bar: session tabs | layout switcher | actions */
-  private renderFsTabs() {
+  renderFsTabs() {
     if (!this.tabBarEl || this.isRenaming) return;
     while (this.tabBarEl.firstChild) this.tabBarEl.removeChild(this.tabBarEl.firstChild);
 
@@ -1334,9 +1341,10 @@ class FullscreenManager {
       tab.addEventListener("click", () => {
         if (this.isRenaming) return;
         session.hasActivity = false;
+        // Delegate to view — single source of truth for focus + render
+        this.view.switchTo(session);
+        // Keep legacy field in sync
         this.focusedSession = session;
-        this.renderFsTabs();
-        this.rebuildPanes();
       });
 
       tab.addEventListener("contextmenu", (e) => {
@@ -1351,12 +1359,6 @@ class FullscreenManager {
           menu.addItem((item) =>
             item.setTitle("Close").setIcon("x").onClick(() => {
               this.view.closeSession(session);
-              this.savedPositions.delete(session);
-              if (this.focusedSession === session) {
-                this.focusedSession = this.view.sessions[this.view.sessions.length - 1] || null;
-              }
-              this.renderFsTabs();
-              this.rebuildPanes();
             })
           );
         }
@@ -1372,16 +1374,8 @@ class FullscreenManager {
     newTab.textContent = "+";
     newTab.addEventListener("click", () => {
       this.view.createSession();
-      const newest = this.view.sessions[this.view.sessions.length - 1];
-      // Save position for the new session
-      this.savedPositions.set(newest, {
-        parent: newest.containerEl.parentElement!,
-        nextSibling: newest.containerEl.nextSibling,
-      });
-      this.focusedSession = newest;
+      // Re-attach activity callbacks to include the freshly created session
       this.setupActivityCallbacks();
-      this.renderFsTabs();
-      this.rebuildPanes();
     });
     tabsArea.appendChild(newTab);
 
@@ -1463,7 +1457,7 @@ class FullscreenManager {
         if ((session as any)._toolbarNameEl) (session as any)._toolbarNameEl.textContent = name;
       }
       this.renderFsTabs();
-      this.rebuildPanes();
+      this.view.renderLayout();
       this.view.renderTabs();
       this.view.saveState();
     };
@@ -1477,92 +1471,6 @@ class FullscreenManager {
 
     input.focus();
     input.select();
-  }
-
-  /** Rebuild the grid panes based on current layout and sessions */
-  private rebuildPanes() {
-    if (!this.gridEl || this.isRenaming) return;
-
-    // Detach sessions from panes before clearing (so they don't get destroyed)
-    while (this.gridEl.firstChild) this.gridEl.removeChild(this.gridEl.firstChild);
-
-    const visibleSessions = this.getVisibleSessions();
-    const visibleSet = new Set(visibleSessions);
-    const multiPane = visibleSessions.length > 1;
-
-    // Hide non-visible sessions (park them off-screen in overlay so they're not orphaned)
-    for (const session of this.view.sessions) {
-      if (!visibleSet.has(session)) {
-        session.containerEl.classList.remove("is-active");
-        session.containerEl.style.display = "none";
-        this.overlay?.appendChild(session.containerEl);
-      }
-    }
-
-    for (const session of visibleSessions) {
-      const pane = document.createElement("div");
-      pane.className = "mc-fullscreen-pane";
-      if (session === this.focusedSession) pane.classList.add("is-focused");
-
-      // Show a thin label in multi-pane layouts so you know which is which
-      // Session toolbar inside each session already provides name + close
-
-      session.containerEl.style.display = "";
-      session.containerEl.classList.add("is-active");
-      pane.appendChild(session.containerEl);
-
-      // Click pane to focus it
-      pane.addEventListener("mousedown", () => {
-        if (this.focusedSession !== session) {
-          session.hasActivity = false;
-          this.focusedSession = session;
-          this.gridEl?.querySelectorAll(".mc-fullscreen-pane").forEach((p) => {
-            p.classList.toggle("is-focused", p === pane);
-          });
-          this.renderFsTabs();
-        }
-        session.focus();
-      });
-
-      this.gridEl.appendChild(pane);
-    }
-
-    requestAnimationFrame(() => this.fitAllVisible());
-  }
-
-  private getVisibleSessions(): TerminalSession[] {
-    const all = this.view.sessions;
-    if (all.length === 0) return [];
-
-    const maxPanes: Record<string, number> = {
-      "single": 1, "split-h": 2, "split-v": 2,
-      "grid": 4, "grid-6": 6, "grid-8": 8,
-    };
-    const slots = maxPanes[this.layout] ?? 4;
-
-    if (slots <= 1) {
-      return this.focusedSession && all.includes(this.focusedSession)
-        ? [this.focusedSession] : [all[0]];
-    }
-
-    const visible = all.slice(0, Math.min(slots, all.length));
-    // Guarantee focused session is visible
-    if (this.focusedSession && !visible.includes(this.focusedSession) && all.includes(this.focusedSession)) {
-      visible[visible.length - 1] = this.focusedSession;
-    }
-    return visible;
-  }
-
-  private fitAllVisible() {
-    if (!this.gridEl) return;
-    const sessions = this.getVisibleSessions();
-    for (const session of sessions) {
-      session.fit();
-    }
-    // Don't steal focus from rename input
-    if (!this.isRenaming && this.focusedSession && sessions.includes(this.focusedSession)) {
-      this.focusedSession.focus();
-    }
   }
 
   private setupActivityCallbacks() {
@@ -1588,33 +1496,6 @@ class FullscreenManager {
     }
   }
 
-  private restoreAll() {
-    for (const [session, saved] of this.savedPositions) {
-      // Reset any inline display override
-      session.containerEl.style.display = "";
-      try {
-        if (saved.nextSibling && saved.nextSibling.parentNode === saved.parent) {
-          saved.parent.insertBefore(session.containerEl, saved.nextSibling);
-        } else {
-          saved.parent.appendChild(session.containerEl);
-        }
-      } catch {
-        // Fallback: put it back in the sessions container
-        this.view.sessionsEl.appendChild(session.containerEl);
-      }
-    }
-
-    // Also restore any sessions not in savedPositions (created during fullscreen)
-    for (const session of this.view.sessions) {
-      if (!this.savedPositions.has(session)) {
-        session.containerEl.style.display = "";
-        this.view.sessionsEl.appendChild(session.containerEl);
-      }
-      session.hide();
-    }
-    this.savedPositions.clear();
-  }
-
   destroy() {
     if (this.isOpen) {
       // Restore sidebar before destroying
@@ -1623,8 +1504,10 @@ class FullscreenManager {
         this.savedSidebarParent.appendChild(sidebar);
         this.savedSidebarParent = null;
       }
-      // Quick exit without animation
-      this.restoreAll();
+      // Quick exit without animation: park sessions, switch view to inline, render
+      for (const s of this.view.sessions) {
+        this.view.parkingEl.appendChild(s.containerEl);
+      }
       this.resizeObserver?.disconnect();
       if (this.resizeTimer) clearTimeout(this.resizeTimer);
       this.overlay?.remove();
@@ -1632,6 +1515,9 @@ class FullscreenManager {
       this.tabBarEl = null;
       this.gridEl = null;
       FullscreenManager.overlayOpen = false;
+      this.view.displayMode = { kind: "inline", layout: this.view.displayMode.layout };
+      this.view.fs = null;
+      // Don't call renderLayout here — view may be closing too
     }
   }
 }
@@ -1656,10 +1542,20 @@ class TerminalView extends ItemView {
   tracker: AgentTracker | null = null;
   autoMode = false;
   private sidebarDirty = true;
+  /** @deprecated Use displayMode.layout. Kept until full Iter 10 cleanup. */
   inlineLayout: FullscreenLayout = "single";
-  private visibleSessions: TerminalSession[] = [];
   customSkills: SkillDef[] = [];
   standbyEl!: HTMLElement;
+
+  // --- New unified state (Iter 1) — single source of truth ---
+  /** Display mode + layout. Replaces inlineLayout + FullscreenManager.layout. */
+  displayMode: DisplayMode = { kind: "inline", layout: "single" };
+  /** Parking zone for sessions not currently in any visible pane.
+   *  Sessions stay attached to the DOM here so xterm/listeners survive. */
+  parkingEl!: HTMLElement;
+  /** Reference to active FullscreenManager when fullscreen is open. null otherwise.
+   *  Allows renderLayout() to know if it should render into fs.gridEl or sessionsEl. */
+  fs: FullscreenManager | null = null;
 
   getViewType() { return VIEW_TYPE; }
   getDisplayText() { return "Terminal"; }
@@ -1670,6 +1566,7 @@ class TerminalView extends ItemView {
       sessions: this.sessions.map((s) => ({ id: s.id, name: s.name })),
       activeId: this.activeSession?.id ?? null,
       nextId: this.nextId,
+      layout: this.displayMode.layout,
     };
   }
 
@@ -1685,16 +1582,22 @@ class TerminalView extends ItemView {
         const id = saved.id ?? this.nextId++;
         if (id >= this.nextId) this.nextId = id + 1;
         const vaultPath = (this.app.vault.adapter as any).basePath as string;
-        const session = new TerminalSession(this.sessionsEl, id, vaultPath, this.app);
+        // Spawn into parking — renderLayout() will move them to panes
+        const session = new TerminalSession(this.parkingEl, id, vaultPath, this.app);
         session.name = saved.name ?? `zsh ${id}`;
         (session as any)._autoNameLocked = true;
         this.addSessionToolbar(session);
         this.sessions.push(session);
-        session.hide();
       }
 
-      const target = this.sessions.find((s) => s.id === state.activeId) ?? this.sessions[0];
-      if (target) this.switchTo(target);
+      // Restore layout if persisted, else default to single
+      if (state.layout) {
+        this.displayMode.layout = state.layout as FullscreenLayout;
+        this.inlineLayout = state.layout as FullscreenLayout;
+      }
+
+      this.activeSession = this.sessions.find((s) => s.id === state.activeId) ?? this.sessions[0];
+      this.renderLayout();
       this.renderTabs();
 
       // Auto-resume: launch Claude Code in all restored sessions
@@ -1705,7 +1608,6 @@ class TerminalView extends ItemView {
         setTimeout(() => {
           session.process.stdin?.write(claudeCmd);
         }, 500);
-        // No setupAutoName — restored sessions already have names
       }
     }
     return super.setState(state, result);
@@ -1737,6 +1639,11 @@ class TerminalView extends ItemView {
     // Main area: terminal sessions (left)
     this.sessionsEl = container.createDiv({ cls: "mc-terminal-sessions" });
 
+    // Parking zone — sessions live here when not visible in any pane.
+    // Stays in DOM so xterm renderer + event listeners remain alive.
+    // CSS hides it via display:none.
+    this.parkingEl = container.createDiv({ cls: "mc-parking" });
+
     // Sidebar (right): dashboard + standby + working + to review
     this.sidebarEl = container.createDiv({ cls: "mc-terminal-sidebar" });
     await this.loadCustomSkills();
@@ -1745,15 +1652,14 @@ class TerminalView extends ItemView {
     // Hidden tab bar (still needed for fullscreen manager compatibility)
     this.tabBarEl = document.createElement("div");
 
-    // Resize observer to refit terminals (debounced for smooth dragging)
+    // Resize observer to refit terminals (debounced for smooth dragging).
+    // Only active in inline mode — fullscreen has its own resize observer
+    // on gridEl, set up by FullscreenManager.enter().
     this.resizeObserver = new ResizeObserver(() => {
       if (this.resizeTimer) clearTimeout(this.resizeTimer);
       this.resizeTimer = setTimeout(() => {
-        if (this.inlineLayout !== "single" && this.visibleSessions.length > 0) {
-          this.fitAllInlineVisible();
-        } else {
-          this.activeSession?.fit();
-        }
+        if (this.displayMode.kind !== "inline") return;
+        for (const s of this.computeVisible(this.displayMode.layout)) s.fit();
       }, 60);
     });
     this.resizeObserver.observe(this.sessionsEl);
@@ -1912,19 +1818,11 @@ class TerminalView extends ItemView {
       const btn = layoutGroup.createEl("button", { cls: "mc-sidebar-layout-btn" });
       btn.innerHTML = l.svg;
       btn.title = l.label;
-      // Highlight current inline layout (or fullscreen layout if in fullscreen)
-      const currentLayout = this.fullscreenManager?.isOpen
-        ? (this.fullscreenManager as any).layout
-        : this.inlineLayout;
-      if (l.key === currentLayout) btn.addClass("is-active");
+      // Single source of truth — view.displayMode.layout
+      if (l.key === this.displayMode.layout) btn.addClass("is-active");
       btn.addEventListener("click", () => {
-        if (this.fullscreenManager?.isOpen) {
-          // If in fullscreen, change fullscreen layout
-          this.fullscreenManager?.setLayout(l.key as any);
-        } else {
-          // In normal mode, switch inline layout (no fullscreen)
-          this.setInlineLayout(l.key as any);
-        }
+        // setLayout works the same in inline and fullscreen
+        this.setLayout(l.key as any);
         // Re-highlight active
         layoutGroup.querySelectorAll(".mc-sidebar-layout-btn").forEach((b, i) => {
           b.classList.toggle("is-active", layouts[i].key === l.key);
@@ -1994,7 +1892,7 @@ class TerminalView extends ItemView {
     pluginData.hiddenSkills = (this as any).hiddenSkills ?? [];
     pluginData.skillConfig = (this as any).skillConfig ?? {};
     pluginData.autoMode = this.autoMode ?? false;
-    pluginData.layout = this.inlineLayout ?? "single";
+    pluginData.layout = this.displayMode.layout;
     await src.saveData(pluginData);
   }
 
@@ -2006,7 +1904,8 @@ class TerminalView extends ItemView {
     (this as any).hiddenSkills = pluginData.hiddenSkills ?? [];
     (this as any).skillConfig = pluginData.skillConfig ?? {};
     this.autoMode = pluginData.autoMode ?? false;
-    this.inlineLayout = pluginData.layout ?? "single";
+    this.displayMode.layout = pluginData.layout ?? "single";
+    this.inlineLayout = this.displayMode.layout; // legacy mirror
     (this as any).maxSessions = pluginData.maxSessions ?? 8;
   }
 
@@ -2245,122 +2144,16 @@ class TerminalView extends ItemView {
     return `${h}h ${m % 60}m`;
   }
 
-  /** Apply inline layout — show multiple sessions in CSS grid */
-  setInlineLayout(layout: FullscreenLayout) {
+  /** Unified layout setter — works in both inline and fullscreen modes.
+   *  Updates displayMode.layout and triggers a full render. */
+  setLayout(layout: FullscreenLayout) {
+    if (this.displayMode.layout === layout) return;
+    this.displayMode.layout = layout;
+    // Keep legacy field in sync until Iter 10 cleanup
     this.inlineLayout = layout;
-    this.sessionsEl.dataset.layout = layout;
-
-    if (layout === "single") {
-      // Revert to normal single-session mode
-      this.sessionsEl.classList.remove("mc-multi-pane");
-      // Remove pane wrappers, put sessions back directly
-      for (const session of this.sessions) {
-        const pane = session.containerEl.closest(".mc-inline-pane");
-        if (pane) {
-          this.sessionsEl.appendChild(session.containerEl);
-          pane.remove();
-        }
-        session.containerEl.classList.remove("is-visible");
-        session.containerEl.style.display = "";
-      }
-      this.visibleSessions = [];
-      // Re-show active session
-      if (this.activeSession) {
-        this.activeSession.show(true);
-      }
-      requestAnimationFrame(() => this.activeSession?.fit());
-    } else {
-      // Multi-pane mode
-      this.sessionsEl.classList.add("mc-multi-pane");
-      this.rebuildInlinePanes();
-    }
+    this.renderLayout();
     this.renderSidebarCards();
-  }
-
-  /** Rebuild inline panes based on current layout */
-  private rebuildInlinePanes() {
-    // Clear existing panes
-    const existingPanes = this.sessionsEl.querySelectorAll(".mc-inline-pane");
-    existingPanes.forEach((p) => {
-      // Move sessions back to sessionsEl before removing pane
-      const sessionEl = p.querySelector(".mc-terminal-session");
-      if (sessionEl) this.sessionsEl.appendChild(sessionEl);
-      p.remove();
-    });
-
-    // Determine which sessions to show
-    const all = this.sessions;
-    let visible: TerminalSession[];
-    const activeIdx = this.activeSession ? all.indexOf(this.activeSession) : 0;
-
-    // How many panes this layout supports
-    const maxPanes: Record<string, number> = {
-      "single": 1, "split-h": 2, "split-v": 2,
-      "grid": 4, "grid-6": 6, "grid-8": 8,
-    };
-    const slots = maxPanes[this.inlineLayout] ?? 2;
-
-    if (slots <= 1 || all.length <= 1) {
-      visible = this.activeSession && all.includes(this.activeSession)
-        ? [this.activeSession] : all.slice(0, 1);
-    } else {
-      // Start with first N sessions
-      visible = all.slice(0, Math.min(slots, all.length));
-      // Guarantee activeSession is visible — swap it in if missing
-      if (this.activeSession && !visible.includes(this.activeSession)) {
-        visible[visible.length - 1] = this.activeSession;
-      }
-    }
-
-    this.visibleSessions = visible;
-    const visibleSet = new Set(visible);
-
-    // Hide non-visible sessions
-    for (const session of all) {
-      if (!visibleSet.has(session)) {
-        session.containerEl.style.display = "none";
-        session.containerEl.classList.remove("is-active", "is-visible");
-      }
-    }
-
-    // Create pane wrappers for visible sessions
-    for (const session of visible) {
-      const pane = document.createElement("div");
-      pane.className = "mc-inline-pane";
-      if (session === this.activeSession) pane.classList.add("is-focused");
-
-      // Label in multi-pane
-      // Session toolbar inside each session already provides name + close
-
-      session.containerEl.style.display = "";
-      session.containerEl.classList.add("is-active", "is-visible");
-      pane.appendChild(session.containerEl);
-
-      pane.addEventListener("mousedown", () => {
-        if (this.activeSession !== session) {
-          this.activeSession = session;
-          this.sessionsEl.querySelectorAll(".mc-inline-pane").forEach((p) => {
-            p.classList.toggle("is-focused", p === pane);
-          });
-          session.focus();
-          this.renderSidebarCards();
-        }
-      });
-
-      this.sessionsEl.appendChild(pane);
-    }
-
-    requestAnimationFrame(() => this.fitAllInlineVisible());
-  }
-
-  /** Fit all visible sessions in inline multi-pane mode */
-  private fitAllInlineVisible() {
-    for (const session of this.visibleSessions) {
-      session.fit();
-    }
-    if (this.activeSession && this.visibleSessions.includes(this.activeSession)) {
-      this.activeSession.focus();
-    }
+    this.saveState();
   }
 
   /** Lightweight timer update — only touches time text elements, no DOM rebuild */
@@ -2565,7 +2358,9 @@ class TerminalView extends ItemView {
       }
       const id = this.nextId++;
       const vaultPath = (this.app.vault.adapter as any).basePath as string;
-      const session = new TerminalSession(this.sessionsEl, id, vaultPath, this.app);
+      // Spawn into parking — renderLayout() will move it into the right pane.
+      // No more direct parent = sessionsEl + then immediate reparent by switchTo.
+      const session = new TerminalSession(this.parkingEl, id, vaultPath, this.app);
       if (name) {
         session.name = name;
         (session as any)._autoNameLocked = true;
@@ -2573,7 +2368,11 @@ class TerminalView extends ItemView {
       this.addSessionToolbar(session);
       this.setupAutoName(session);
       this.sessions.push(session);
-      this.switchTo(session);
+      // I6: focus the new session, but DO NOT auto-flip layout. switchTo()
+      // is replaced by direct state mutation + renderLayout() to avoid the
+      // legacy auto-split side effect (Iter 6 will simplify switchTo itself).
+      this.activeSession = session;
+      this.renderLayout();
       this.renderSidebarCards();
       this.saveState();
       return session;
@@ -2588,57 +2387,193 @@ class TerminalView extends ItemView {
   }
 
   switchTo(session: TerminalSession) {
-    if (session === this.activeSession) return;
-
-    if (this.inlineLayout === "single") {
-      // Auto-split: if multiple sessions exist, switch to split-h
-      if (this.sessions.length > 1) {
-        this.activeSession = session;
-        this.inlineLayout = "split-h";
-        this.sessionsEl.dataset.layout = "split-h";
-        this.sessionsEl.classList.add("mc-multi-pane");
-        this.rebuildInlinePanes();
-      } else {
-        if (this.activeSession) this.activeSession.hide();
-        this.activeSession = session;
-        session.show(this.isRenaming);
-      }
-    } else {
-      // Multi-pane: set active, rebuild if session not visible
-      this.activeSession = session;
-      if (!this.visibleSessions.includes(session)) {
-        this.rebuildInlinePanes();
-      } else {
-        // Just update focus highlight
-        this.sessionsEl.querySelectorAll(".mc-inline-pane").forEach((pane) => {
-          const hasSession = pane.contains(session.containerEl);
-          pane.classList.toggle("is-focused", hasSession);
-        });
-        session.focus();
-      }
+    if (!this.sessions.includes(session)) return;
+    if (session === this.activeSession) {
+      // Already focused — re-focus the input element in case focus was lost
+      session.focus();
+      return;
     }
+    // I6: switchTo only changes focus + re-renders. No auto-split, no
+    // direct DOM mutation. renderLayout() is the single source of DOM truth.
+    this.activeSession = session;
+    this.renderLayout();
     this.renderSidebarCards();
     this.saveState();
+  }
+
+  // --- Iter 2: Unified render path ---
+
+  /** Single source of truth for DOM layout. Idempotent. Called after every
+   *  state change (close/create/switch/setLayout/enterFs/exitFs).
+   *  Reads: this.displayMode, this.activeSession, this.sessions, this.fs
+   *  Writes: target.children (panes), parkingEl (parked sessions). */
+  renderLayout() {
+    const { kind, layout } = this.displayMode;
+    const target: HTMLElement = (kind === "fullscreen" && this.fs?.gridEl)
+      ? this.fs.gridEl
+      : this.sessionsEl;
+
+    // Set data attributes for CSS layout grids
+    if (kind === "inline") {
+      this.sessionsEl.dataset.mode = "inline";
+      this.sessionsEl.dataset.layout = layout;
+      // Strip legacy class from old rebuildInlinePanes path (transitional)
+      this.sessionsEl.classList.remove("mc-multi-pane");
+    }
+    if (kind === "fullscreen" && this.fs?.gridEl) {
+      this.fs.gridEl.dataset.mode = "fullscreen";
+      this.fs.gridEl.dataset.layout = layout;
+    }
+
+    const visible = this.computeVisible(layout);
+    const visibleSet = new Set(visible);
+
+    // 1. Park non-visible sessions in parkingEl (single deterministic place)
+    for (const s of this.sessions) {
+      if (!visibleSet.has(s)) {
+        if (s.containerEl.parentElement !== this.parkingEl) {
+          this.parkingEl.appendChild(s.containerEl);
+        }
+        s.containerEl.classList.remove("is-active");
+      }
+    }
+
+    // 1b. Clean up empty pane wrappers in the OTHER container (the one we're
+    //     not rendering into). This prevents leaks when toggling display mode.
+    const legacySelectors = ":scope > .mc-pane, :scope > .mc-inline-pane, :scope > .mc-fullscreen-pane";
+    const otherTarget: HTMLElement | null = (kind === "fullscreen")
+      ? this.sessionsEl
+      : (this.fs?.gridEl ?? null);
+    if (otherTarget && otherTarget !== target) {
+      const stalePanes = Array.from(otherTarget.querySelectorAll(legacySelectors)) as HTMLElement[];
+      for (const pane of stalePanes) {
+        const inner = pane.querySelector(".mc-terminal-session") as HTMLElement | null;
+        if (inner) this.parkingEl.appendChild(inner);
+        pane.remove();
+      }
+    }
+
+    // 2. Diff existing .mc-pane wrappers against desired visible[].
+    //    If they match in order AND target match, just update focus classes
+    //    (avoids reparenting xterm containers which can cause flicker).
+    const existingPanes = Array.from(target.querySelectorAll(legacySelectors)) as HTMLElement[];
+
+    const sameSet = existingPanes.length === visible.length
+      && existingPanes.every((pane, i) =>
+        pane.classList.contains("mc-pane") &&
+        pane.dataset.sessionId === String(visible[i].id)
+      );
+
+    if (sameSet) {
+      // Fast path: just refresh focus class
+      for (let i = 0; i < existingPanes.length; i++) {
+        existingPanes[i].classList.toggle("is-focused", visible[i] === this.activeSession);
+      }
+    } else {
+      // Slow path: rebuild panes from scratch
+      for (const pane of existingPanes) {
+        const inner = pane.querySelector(".mc-terminal-session") as HTMLElement | null;
+        if (inner) this.parkingEl.appendChild(inner);
+        pane.remove();
+      }
+
+      for (const session of visible) {
+        const pane = document.createElement("div");
+        pane.className = "mc-pane";
+        pane.dataset.sessionId = String(session.id);
+        if (session === this.activeSession) pane.classList.add("is-focused");
+
+        session.containerEl.style.display = "";
+        session.containerEl.classList.add("is-active");
+        pane.appendChild(session.containerEl);
+
+        pane.addEventListener("mousedown", () => {
+          if (this.activeSession !== session) {
+            this.switchTo(session);
+          } else {
+            session.focus();
+          }
+        });
+
+        target.appendChild(pane);
+      }
+    }
+
+    // 4. Fit + focus after layout settles. Skip destroyed sessions in case
+    //    closeSession ran between this frame and the next (race safety).
+    requestAnimationFrame(() => {
+      for (const s of visible) {
+        if (s.destroyed) continue;
+        s.fit();
+      }
+      if (this.activeSession && !this.activeSession.destroyed && visibleSet.has(this.activeSession)) {
+        this.activeSession.focus();
+      }
+    });
+
+    // 5. Re-render fullscreen tabs if FS is active
+    if (kind === "fullscreen") this.fs?.renderFsTabs();
+  }
+
+  // --- Iter 1: Helpers for new bulletproof flow (not yet wired) ---
+
+  /** Pick a neighbor session to focus when `closing` is being removed.
+   *  Strategy: prefer the next session in the array, fall back to previous,
+   *  null if `closing` was the only session. */
+  pickNeighbor(closing: TerminalSession): TerminalSession | null {
+    const idx = this.sessions.indexOf(closing);
+    if (idx < 0) return this.activeSession;
+    if (idx + 1 < this.sessions.length) return this.sessions[idx + 1];
+    if (idx - 1 >= 0) return this.sessions[idx - 1];
+    return null;
+  }
+
+  /** Compute which sessions should be visible for the given layout.
+   *  Invariant I4: focused session MUST be in the result if it exists in `sessions`.
+   *  Stable order: preserves array order so panes don't reshuffle when focus changes,
+   *  unless the focused session is outside the slot window — then it swaps in. */
+  computeVisible(layout: FullscreenLayout): TerminalSession[] {
+    const all = this.sessions;
+    if (all.length === 0) return [];
+    const slots = SLOT_COUNT[layout] ?? 1;
+    // Defensive: if activeSession is stale (not in sessions), fall back to first
+    const focused = (this.activeSession && all.includes(this.activeSession))
+      ? this.activeSession
+      : all[0];
+
+    if (slots === 1) {
+      return [focused];
+    }
+
+    // Multi-pane: take first N sessions in array order (stable). If focused
+    // isn't in that slice, swap it in for the last slot (so focused is always
+    // visible — invariant I4 — but order is preserved otherwise).
+    const visible = all.slice(0, Math.min(slots, all.length));
+    if (!visible.includes(focused)) {
+      visible[visible.length - 1] = focused;
+    }
+    return visible;
   }
 
   closeSession(session: TerminalSession) {
     if ((session as any)._autoNameInterval) clearInterval((session as any)._autoNameInterval);
     if ((session as any)._skillCleanup) (session as any)._skillCleanup();
+    // Untrack BEFORE destroy so the tracker can detach its own process listeners
+    // while the process reference is still valid.
+    this.tracker?.untrack(session);
+
+    // I7: pick neighbor BEFORE destroy so we still have valid index
+    const wasFocused = this.activeSession === session;
+    const newFocused = wasFocused ? this.pickNeighbor(session) : this.activeSession;
+
     session.destroy();
     this.sessions = this.sessions.filter((s) => s !== session);
-    this.visibleSessions = this.visibleSessions.filter((s) => s !== session);
-    this.tracker?.untrack(session.id);
+    this.activeSession = newFocused && this.sessions.includes(newFocused)
+      ? newFocused
+      : (this.sessions[0] ?? null);
 
-    if (this.activeSession === session) {
-      this.activeSession = null;
-      if (this.sessions.length > 0) {
-        this.switchTo(this.sessions[this.sessions.length - 1]);
-      }
-    }
-    // Rebuild panes if in multi-pane mode
-    if (this.inlineLayout !== "single" && this.sessions.length > 0) {
-      this.rebuildInlinePanes();
-    }
+    // Single render path — handles both inline and fullscreen targets
+    this.renderLayout();
     this.renderSidebarCards();
     this.saveState();
   }
@@ -3270,7 +3205,7 @@ class AgentTracker {
   }
 
   track(session: TerminalSession, skillName: string) {
-    this.untrack(session.id);
+    this.untrack(session);
 
     const now = Date.now();
     const entry: TrackedSession = {
@@ -3312,7 +3247,24 @@ class AgentTracker {
     this.exitListeners.set(session.id, exitListener);
   }
 
-  untrack(sessionId: number) {
+  untrack(sessionOrId: TerminalSession | number) {
+    const sessionId = typeof sessionOrId === "number" ? sessionOrId : sessionOrId.id;
+    const session = typeof sessionOrId === "number" ? null : sessionOrId;
+
+    // Actually detach listeners from the process — deleting from the Map
+    // alone left the EventEmitter callbacks attached, so they fired against
+    // a destroyed session and wrote to a disposed terminal.
+    const stdoutListener = this.listeners.get(sessionId);
+    const exitListener = this.exitListeners.get(sessionId);
+    if (session) {
+      try {
+        if (stdoutListener) session.process.stdout?.removeListener("data", stdoutListener);
+      } catch {}
+      try {
+        if (exitListener) session.process.removeListener("exit", exitListener);
+      } catch {}
+    }
+
     this.tracked = this.tracked.filter((t) => t.sessionId !== sessionId);
     this.listeners.delete(sessionId);
     this.exitListeners.delete(sessionId);
@@ -3821,11 +3773,8 @@ export default class TerminalPlugin extends Plugin {
           const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE);
           if (leaves.length === 0) return;
           const view = leaves[0].view as TerminalView;
-          if (view.fullscreenManager?.isOpen) {
-            view.fullscreenManager.setLayout(layout as any);
-          } else {
-            view.setInlineLayout(layout as any);
-          }
+          // setLayout works the same in inline and fullscreen
+          view.setLayout(layout as any);
           view.buildSidebar();
         },
       });

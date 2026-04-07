@@ -2011,3 +2011,148 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
 .mc-sidebar-library-btn {
   cursor: pointer;
 }
+
+/* ============================================================
+ * Bulletproof Layout System (v1.4.0)
+ * Single source of truth: data-mode + data-layout on the
+ * container, .mc-pane wrapper for every visible session.
+ * ============================================================ */
+
+/* Parking zone — sessions live here when not visible.
+ * display:none keeps DOM attached so xterm renderer + listeners survive. */
+.mc-parking {
+  display: none !important;
+}
+
+/* Unified pane wrapper — single class for both inline and fullscreen.
+ * The CSS grid layout is determined by data-layout on the parent container.
+ * Height: 100% works in flex parents (block context), grid items get cell size. */
+.mc-pane {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--background-primary);
+}
+
+.mc-pane.is-focused {
+  outline: 1px solid var(--interactive-accent);
+  outline-offset: -1px;
+}
+
+/* Inside a .mc-pane wrapper, override the default absolute positioning of
+ * .mc-terminal-session and use flex layout instead. This is the same pattern
+ * the legacy .mc-inline-pane and .mc-fullscreen-pane used. */
+.mc-pane > .mc-terminal-session {
+  position: relative;
+  inset: auto;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.mc-pane > .mc-terminal-session .xterm {
+  flex: 1;
+  min-height: 0;
+}
+
+/* --- Inline mode layout grids (sessionsEl as parent) --- */
+
+.mc-terminal-sessions[data-mode="inline"] {
+  display: flex;
+  flex-direction: column;
+}
+
+.mc-terminal-sessions[data-mode="inline"][data-layout="single"] {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+}
+
+.mc-terminal-sessions[data-mode="inline"][data-layout="split-h"] {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr;
+  gap: 4px;
+}
+
+.mc-terminal-sessions[data-mode="inline"][data-layout="split-v"] {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 4px;
+}
+
+.mc-terminal-sessions[data-mode="inline"][data-layout="grid"] {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 4px;
+}
+
+.mc-terminal-sessions[data-mode="inline"][data-layout="grid-6"] {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr 1fr;
+  gap: 4px;
+}
+
+.mc-terminal-sessions[data-mode="inline"][data-layout="grid-8"] {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr 1fr 1fr;
+  gap: 4px;
+}
+
+/* --- Fullscreen mode layout grids (gridEl as parent) ---
+ * Identical rules but matched on .mc-fullscreen-grid + data-layout.
+ * Note: existing .mc-fullscreen-grid[data-layout="*"] rules at lines 856+
+ * are kept for backward compat until Iter 10 cleanup. The new rules below
+ * scope by data-mode for clarity. */
+
+.mc-fullscreen-grid[data-mode="fullscreen"][data-layout="single"] {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+}
+
+.mc-fullscreen-grid[data-mode="fullscreen"][data-layout="split-h"] {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr;
+  gap: 4px;
+}
+
+.mc-fullscreen-grid[data-mode="fullscreen"][data-layout="split-v"] {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 4px;
+}
+
+.mc-fullscreen-grid[data-mode="fullscreen"][data-layout="grid"] {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 4px;
+}
+
+.mc-fullscreen-grid[data-mode="fullscreen"][data-layout="grid-6"] {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr 1fr;
+  gap: 4px;
+}
+
+.mc-fullscreen-grid[data-mode="fullscreen"][data-layout="grid-8"] {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr 1fr 1fr;
+  gap: 4px;
+}
