@@ -2039,8 +2039,9 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
 }
 
 .mc-pane.is-focused {
-  outline: 1px solid var(--interactive-accent);
-  outline-offset: -1px;
+  outline: 2px solid #EB670F;
+  outline-offset: -2px;
+  border-radius: 2px;
 }
 
 /* Inside a .mc-pane wrapper, override the default absolute positioning of

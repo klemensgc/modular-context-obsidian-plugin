@@ -1556,6 +1556,11 @@ class TerminalView extends ItemView {
   /** Reference to active FullscreenManager when fullscreen is open. null otherwise.
    *  Allows renderLayout() to know if it should render into fs.gridEl or sessionsEl. */
   fs: FullscreenManager | null = null;
+  /** Persistent pane→session assignment for multi-pane layouts.
+   *  paneSlots[i] = session rendered in slot i. Preserved across switchTo()
+   *  so swapping sessions replaces the currently FOCUSED slot, not always the last.
+   *  Kept in sync by syncPaneSlots(). */
+  paneSlots: TerminalSession[] = [];
 
   getViewType() { return VIEW_TYPE; }
   getDisplayText() { return "Terminal"; }
@@ -2368,6 +2373,19 @@ class TerminalView extends ItemView {
       this.addSessionToolbar(session);
       this.setupAutoName(session);
       this.sessions.push(session);
+      // In multi-pane mode, replace the currently focused slot with the new
+      // session (same policy as switchTo), so create-in-split feels consistent
+      // with sidebar-click-in-split.
+      const slots = SLOT_COUNT[this.displayMode.layout] ?? 1;
+      if (slots > 1) {
+        this.syncPaneSlots();
+        const focusedIdx = this.activeSession
+          ? this.paneSlots.indexOf(this.activeSession)
+          : -1;
+        if (focusedIdx >= 0) {
+          this.paneSlots[focusedIdx] = session;
+        }
+      }
       // I6: focus the new session, but DO NOT auto-flip layout. switchTo()
       // is replaced by direct state mutation + renderLayout() to avoid the
       // legacy auto-split side effect (Iter 6 will simplify switchTo itself).
@@ -2393,6 +2411,22 @@ class TerminalView extends ItemView {
       session.focus();
       return;
     }
+
+    const slots = SLOT_COUNT[this.displayMode.layout] ?? 1;
+
+    if (slots > 1) {
+      // Multi-pane: if target is already visible, just move focus (no swap).
+      // If not visible, replace the CURRENTLY FOCUSED slot (not always the last).
+      this.syncPaneSlots();
+      if (!this.paneSlots.includes(session)) {
+        const focusedIdx = this.activeSession
+          ? this.paneSlots.indexOf(this.activeSession)
+          : -1;
+        const replaceIdx = focusedIdx >= 0 ? focusedIdx : this.paneSlots.length - 1;
+        this.paneSlots[replaceIdx] = session;
+      }
+    }
+
     // I6: switchTo only changes focus + re-renders. No auto-split, no
     // direct DOM mutation. renderLayout() is the single source of DOM truth.
     this.activeSession = session;
@@ -2528,10 +2562,34 @@ class TerminalView extends ItemView {
     return null;
   }
 
+  /** Reconcile this.paneSlots with the current layout's slot count and
+   *  sessions list. Preserves existing assignments where possible so swapping
+   *  focus doesn't reshuffle panes. Called from computeVisible() and switchTo(). */
+  syncPaneSlots() {
+    const slots = SLOT_COUNT[this.displayMode.layout] ?? 1;
+    // 1. Drop destroyed/removed sessions
+    this.paneSlots = this.paneSlots.filter((s) => this.sessions.includes(s));
+    // 2. Trim if shrinking — but ensure focused stays visible (invariant I4)
+    if (this.paneSlots.length > slots) {
+      const focused = this.activeSession;
+      this.paneSlots = this.paneSlots.slice(0, slots);
+      if (focused && this.sessions.includes(focused) && !this.paneSlots.includes(focused)) {
+        this.paneSlots[slots - 1] = focused;
+      }
+    }
+    // 3. Fill empty slots with unused sessions (stable order from this.sessions)
+    if (this.paneSlots.length < slots) {
+      for (const s of this.sessions) {
+        if (this.paneSlots.length >= slots) break;
+        if (!this.paneSlots.includes(s)) this.paneSlots.push(s);
+      }
+    }
+  }
+
   /** Compute which sessions should be visible for the given layout.
    *  Invariant I4: focused session MUST be in the result if it exists in `sessions`.
-   *  Stable order: preserves array order so panes don't reshuffle when focus changes,
-   *  unless the focused session is outside the slot window — then it swaps in. */
+   *  For multi-pane: reads persistent this.paneSlots so focus changes don't
+   *  reshuffle panes and swaps target the focused slot (set by switchTo). */
   computeVisible(layout: FullscreenLayout): TerminalSession[] {
     const all = this.sessions;
     if (all.length === 0) return [];
@@ -2545,14 +2603,16 @@ class TerminalView extends ItemView {
       return [focused];
     }
 
-    // Multi-pane: take first N sessions in array order (stable). If focused
-    // isn't in that slice, swap it in for the last slot (so focused is always
-    // visible — invariant I4 — but order is preserved otherwise).
-    const visible = all.slice(0, Math.min(slots, all.length));
-    if (!visible.includes(focused)) {
-      visible[visible.length - 1] = focused;
+    // Multi-pane: use persistent paneSlots, synced against current state.
+    // Ensures focused is visible (I4) without shuffling other slots.
+    this.syncPaneSlots();
+    if (!this.paneSlots.includes(focused)) {
+      // Focused isn't in any slot — place it into the previously-focused slot
+      // if we can detect one; otherwise fall back to the last slot.
+      const fallbackIdx = this.paneSlots.length - 1;
+      this.paneSlots[fallbackIdx >= 0 ? fallbackIdx : 0] = focused;
     }
-    return visible;
+    return [...this.paneSlots];
   }
 
   closeSession(session: TerminalSession) {
