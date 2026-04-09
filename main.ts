@@ -738,6 +738,8 @@ class TerminalSession {
   private bookmarkManager: BookmarkManager | null = null;
   hasActivity = false;
   destroyed = false;
+  /** Visual glyph for compact sidebar. Glyph id (e.g. "circle") or skill icon name (e.g. "rocket"). */
+  glyph = "";
   _lastStdoutAt = 0;
   private _activityCallback: ((session: TerminalSession) => void) | null = null;
   setActivityCallback(cb: ((session: TerminalSession) => void) | null) {
@@ -1127,6 +1129,19 @@ class TerminalSession {
 // --- FullscreenManager ---
 
 type FullscreenLayout = "single" | "split-h" | "split-v" | "grid" | "grid-6" | "grid-8";
+
+/** Session glyphs — 8 distinct geometric shapes for visual terminal identification.
+ *  Stroke-only SVGs, 14×14, designed to be distinguishable at small sizes. */
+const SESSION_GLYPHS: { id: string; svg: string }[] = [
+  { id: "circle",   svg: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="7" cy="7" r="5.5"/></svg>' },
+  { id: "square",   svg: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="2" width="10" height="10" rx="1"/></svg>' },
+  { id: "triangle", svg: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M7 2 L12.5 12 L1.5 12 Z"/></svg>' },
+  { id: "diamond",  svg: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M7 1.5 L12.5 7 L7 12.5 L1.5 7 Z"/></svg>' },
+  { id: "hexagon",  svg: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M7 1 L12.2 4 L12.2 10 L7 13 L1.8 10 L1.8 4 Z"/></svg>' },
+  { id: "star",     svg: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M7 1 L8.8 5.2 L13 5.2 L9.6 8 L10.8 12.5 L7 9.8 L3.2 12.5 L4.4 8 L1 5.2 L5.2 5.2 Z"/></svg>' },
+  { id: "cross",    svg: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M7 2 L7 12 M2 7 L12 7"/></svg>' },
+  { id: "chevron",  svg: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 3 L8 7 L3 11 M7 3 L12 7 L7 11"/></svg>' },
+];
 
 /** Number of pane slots for each layout. Used by computeVisible() and renderLayout(). */
 const SLOT_COUNT: Record<FullscreenLayout, number> = {
@@ -1556,6 +1571,8 @@ class TerminalView extends ItemView {
   inlineLayout: FullscreenLayout = "single";
   customSkills: SkillDef[] = [];
   standbyEl!: HTMLElement;
+  /** Compact sidebar mode — icon-only 48px. Starts expanded (false), not persisted. */
+  sidebarCompact = false;
 
   // --- New unified state (Iter 1) — single source of truth ---
   /** Display mode + layout. Replaces inlineLayout + FullscreenManager.layout. */
@@ -1578,7 +1595,7 @@ class TerminalView extends ItemView {
 
   getState() {
     return {
-      sessions: this.sessions.map((s) => ({ id: s.id, name: s.name })),
+      sessions: this.sessions.map((s) => ({ id: s.id, name: s.name, glyph: s.glyph })),
       activeId: this.activeSession?.id ?? null,
       nextId: this.nextId,
       layout: this.displayMode.layout,
@@ -1600,9 +1617,12 @@ class TerminalView extends ItemView {
         // Spawn into parking — renderLayout() will move them to panes
         const session = new TerminalSession(this.parkingEl, id, vaultPath, this.app);
         session.name = saved.name ?? `zsh ${id}`;
+        session.glyph = saved.glyph ?? "";
         (session as any)._autoNameLocked = true;
         this.addSessionToolbar(session);
         this.sessions.push(session);
+        // Assign glyph if not persisted (migration from older state)
+        if (!session.glyph) this.assignGlyph(session);
       }
 
       // Restore layout if persisted, else default to single
@@ -1709,13 +1729,35 @@ class TerminalView extends ItemView {
 
   buildSidebar() {
     this.sidebarEl.empty();
+    this.sidebarEl.classList.toggle("is-compact", this.sidebarCompact);
 
-    // --- Toolbar (info icon) ---
+    // --- Collapse/Expand toggle ---
     const toolbar = this.sidebarEl.createDiv({ cls: "mc-sidebar-toolbar" });
-    const infoBtn = toolbar.createDiv({ cls: "mc-sidebar-info-btn" });
-    setIcon(infoBtn, "info");
-    infoBtn.title = "About this plugin";
-    infoBtn.addEventListener("click", () => new OnboardingModal(this.app, this).open());
+    const collapseBtn = toolbar.createDiv({ cls: "mc-sidebar-collapse-btn" });
+    setIcon(collapseBtn, this.sidebarCompact ? "chevron-left" : "chevron-right");
+    collapseBtn.title = this.sidebarCompact ? "Expand sidebar" : "Collapse sidebar";
+    collapseBtn.addEventListener("click", () => {
+      this.sidebarCompact = !this.sidebarCompact;
+      this.buildSidebar();
+      // Refit terminals after sidebar width change
+      requestAnimationFrame(() => {
+        for (const s of this.computeVisible(this.displayMode.layout)) s.fit();
+      });
+    });
+
+    if (!this.sidebarCompact) {
+      const infoBtn = toolbar.createDiv({ cls: "mc-sidebar-info-btn" });
+      setIcon(infoBtn, "info");
+      infoBtn.title = "About this plugin";
+      infoBtn.addEventListener("click", () => new OnboardingModal(this.app, this).open());
+    }
+
+    if (this.sidebarCompact) {
+      this.buildCompactSidebar();
+      return;
+    }
+
+    // --- EXPANDED MODE (default, unchanged) ---
 
     // --- Dashboard section ---
     const dashSection = this.sidebarEl.createDiv({ cls: "mc-sidebar-section" });
@@ -2012,6 +2054,83 @@ class TerminalView extends ItemView {
 
   /** Keep the fullscreen toggle button icon in sync with actual state.
    *  Called from buildSidebar, toggle click, enter(), and exit(). */
+  /** Build the compact (icon-only) sidebar variant. */
+  private buildCompactSidebar() {
+    // --- Skills: top 4 primary as icon buttons ---
+    const skillsArea = this.sidebarEl.createDiv({ cls: "mc-compact-skills" });
+    const allSkills = this.getVisibleSkills();
+    const primarySkills = allSkills.filter((s: any) => s.primary).slice(0, 4);
+    for (const skill of primarySkills) {
+      const btn = skillsArea.createDiv({ cls: "mc-compact-icon-btn" });
+      setIcon(btn, this.getSkillIcon(skill.id));
+      btn.title = skill.label;
+      btn.addEventListener("click", () => this.launchSkill(skill));
+      btn.addEventListener("contextmenu", (e: MouseEvent) => this.showSkillMenu(e, skill));
+    }
+
+    // Info button (compact)
+    const infoBtn = skillsArea.createDiv({ cls: "mc-compact-icon-btn" });
+    setIcon(infoBtn, "info");
+    infoBtn.title = "About this plugin";
+    infoBtn.addEventListener("click", () => new OnboardingModal(this.app, this).open());
+
+    // Divider
+    this.sidebarEl.createDiv({ cls: "mc-compact-divider" });
+
+    // --- Sessions: glyph icons ---
+    const sessionsArea = this.sidebarEl.createDiv({ cls: "mc-compact-sessions" });
+    this.standbyEl = sessionsArea;
+    this.workingEl = sessionsArea;
+    this.reviewEl = sessionsArea;
+
+    // "+" new session button
+    const newBtn = sessionsArea.createDiv({ cls: "mc-compact-icon-btn mc-compact-new" });
+    setIcon(newBtn, "plus");
+    newBtn.title = "New session";
+    newBtn.addEventListener("click", () => this.createSession());
+
+    // Divider
+    this.sidebarEl.createDiv({ cls: "mc-compact-divider" });
+
+    // --- Layout controls: vertical ---
+    const layoutArea = this.sidebarEl.createDiv({ cls: "mc-compact-layouts" });
+    const layouts: { key: string; label: string; svg: string }[] = [
+      { key: "single", label: "Single", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/></svg>' },
+      { key: "split-h", label: "Side by side", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/></svg>' },
+      { key: "split-v", label: "Stacked", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="1" y1="6" x2="11" y2="6"/></svg>' },
+      { key: "grid", label: "Grid 2×2", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="6" x2="11" y2="6"/></svg>' },
+    ];
+    for (const l of layouts) {
+      const btn = layoutArea.createEl("button", { cls: "mc-compact-layout-btn" });
+      btn.innerHTML = l.svg;
+      btn.title = l.label;
+      if (l.key === this.displayMode.layout) btn.addClass("is-active");
+      btn.addEventListener("click", () => {
+        this.setLayout(l.key as any);
+        layoutArea.querySelectorAll(".mc-compact-layout-btn").forEach((b, i) => {
+          b.classList.toggle("is-active", layouts[i].key === l.key);
+        });
+      });
+    }
+
+    // Fullscreen toggle
+    const fsBtn = layoutArea.createEl("button", { cls: "mc-compact-layout-btn mc-sidebar-fs-btn" });
+    this.updateFsIcon();
+    fsBtn.addEventListener("click", () => {
+      this.fullscreenManager?.toggle();
+      this.updateFsIcon();
+    });
+
+    // --- Footer: ROS logo ---
+    const footer = this.sidebarEl.createDiv({ cls: "mc-compact-footer" });
+    const logo = footer.createDiv({ cls: "mc-sidebar-logo" });
+    setIcon(logo, "ros-signet");
+    logo.title = "ReceptionOS";
+    logo.addEventListener("click", () => window.open("https://www.linkedin.com/company/receptionos/", "_blank"));
+
+    this.renderSidebarCards();
+  }
+
   updateFsIcon() {
     const btn = this.sidebarEl?.querySelector(".mc-sidebar-fs-btn") as HTMLElement | null;
     if (!btn) return;
@@ -2027,6 +2146,47 @@ class TerminalView extends ItemView {
     if (!this.standbyEl || !this.workingEl || !this.reviewEl) return;
     const savedScroll = this.sidebarEl?.scrollTop ?? 0;
 
+    // --- Compact mode: unified glyph list ---
+    if (this.sidebarCompact) {
+      this.standbyEl.empty();
+      // Insert glyph icons BEFORE the "+" button
+      const newBtnEl = this.standbyEl.querySelector(".mc-compact-new");
+      for (const session of this.sessions) {
+        const tracked = this.tracker?.tracked.find((t) => t.sessionId === session.id);
+        const isWorking = tracked && tracked.status === "working";
+
+        const btn = document.createElement("div");
+        btn.className = "mc-compact-icon-btn mc-compact-session";
+        if (session === this.activeSession) btn.classList.add("is-active");
+        if (isWorking) btn.classList.add("is-working");
+        btn.title = session.name;
+        btn.dataset.sessionId = String(session.id);
+
+        // Render glyph
+        if (session.glyph.startsWith("skill:")) {
+          setIcon(btn, this.getSkillIcon(session.glyph.slice(6)));
+        } else {
+          const g = SESSION_GLYPHS.find((g) => g.id === session.glyph);
+          btn.innerHTML = g?.svg ?? SESSION_GLYPHS[0].svg;
+        }
+
+        btn.addEventListener("click", () => this.switchTo(session));
+        btn.addEventListener("contextmenu", (e) => {
+          e.preventDefault();
+          const menu = new Menu();
+          menu.addItem((item) => item.setTitle("Close").setIcon("x").onClick(() => this.closeSession(session)));
+          menu.showAtMouseEvent(e);
+        });
+
+        if (newBtnEl) this.standbyEl.insertBefore(btn, newBtnEl);
+        else this.standbyEl.appendChild(btn);
+      }
+      if (this.sidebarEl) this.sidebarEl.scrollTop = savedScroll;
+      return;
+    }
+
+    // --- EXPANDED MODE ---
+
     // --- Standby: sessions without active tracking (regular terminals + dismissed) ---
     this.standbyEl.empty();
     for (const session of this.sessions) {
@@ -2037,6 +2197,14 @@ class TerminalView extends ItemView {
       const card = this.standbyEl.createDiv({ cls: "mc-sidebar-card" });
       if (session === this.activeSession) card.addClass("is-active");
       const cardHeader = card.createDiv({ cls: "mc-sidebar-card-header" });
+      // Glyph icon before name
+      const glyphEl = cardHeader.createDiv({ cls: "mc-sidebar-card-glyph" });
+      if (session.glyph.startsWith("skill:")) {
+        setIcon(glyphEl, this.getSkillIcon(session.glyph.slice(6)));
+      } else {
+        const g = SESSION_GLYPHS.find((g) => g.id === session.glyph);
+        glyphEl.innerHTML = g?.svg ?? SESSION_GLYPHS[0].svg;
+      }
       cardHeader.createSpan({ cls: "mc-sidebar-card-name", text: session.name });
       if (this.sessions.length > 1) {
         const closeBtn = cardHeader.createDiv({ cls: "mc-sidebar-card-close" });
@@ -2093,7 +2261,14 @@ class TerminalView extends ItemView {
       const card = this.workingEl.createDiv({ cls: "mc-sidebar-card" });
       if (session === this.activeSession) card.addClass("is-active");
       const cardHeader = card.createDiv({ cls: "mc-sidebar-card-header" });
-      cardHeader.createSpan({ cls: "mc-sidebar-dot is-active" });
+      // Glyph icon before name
+      const wGlyphEl = cardHeader.createDiv({ cls: "mc-sidebar-card-glyph is-working" });
+      if (session.glyph.startsWith("skill:")) {
+        setIcon(wGlyphEl, this.getSkillIcon(session.glyph.slice(6)));
+      } else {
+        const g = SESSION_GLYPHS.find((g) => g.id === session.glyph);
+        wGlyphEl.innerHTML = g?.svg ?? SESSION_GLYPHS[0].svg;
+      }
       cardHeader.createSpan({ cls: "mc-sidebar-card-name", text: session.name });
       const elapsed = this.formatElapsed(Date.now() - t.startedAt);
       cardHeader.createSpan({ cls: "mc-sidebar-card-time", text: elapsed });
@@ -2215,6 +2390,8 @@ class TerminalView extends ItemView {
 
     const session = this.createSession(skill.label);
     if (!session) return;
+    // Override glyph with skill icon
+    this.assignGlyph(session, skill.id);
     this.tracker?.track(session, skill.id);
     // Skills always launch fresh (no session resume)
     const agentCmd = this.buildAgentCmd();
@@ -2393,6 +2570,8 @@ class TerminalView extends ItemView {
       this.addSessionToolbar(session);
       this.setupAutoName(session);
       this.sessions.push(session);
+      // Assign a visual glyph — skill name for skill-launched, geometric shape for "+"
+      this.assignGlyph(session);
       // In multi-pane mode, replace the currently focused slot with the new
       // session (same policy as switchTo), so create-in-split feels consistent
       // with sidebar-click-in-split.
@@ -2641,6 +2820,30 @@ class TerminalView extends ItemView {
       this.paneSlots[fallbackIdx >= 0 ? fallbackIdx : 0] = focused;
     }
     return [...this.paneSlots];
+  }
+
+  /** Assign a unique glyph to a session. Skill-launched sessions get the skill icon,
+   *  manual "+" sessions get the next unused geometric shape. */
+  assignGlyph(session: TerminalSession, skillId?: string) {
+    if (skillId) {
+      session.glyph = `skill:${skillId}`;
+      return;
+    }
+    const usedGlyphs = new Set(this.sessions.map((s) => s.glyph));
+    const available = SESSION_GLYPHS.find((g) => !usedGlyphs.has(g.id));
+    session.glyph = available?.id ?? SESSION_GLYPHS[session.id % SESSION_GLYPHS.length].id;
+  }
+
+  /** Render a session's glyph as HTML (SVG for shapes, Lucide icon name for skills). */
+  getGlyphHtml(session: TerminalSession): string {
+    if (session.glyph.startsWith("skill:")) {
+      const skillId = session.glyph.slice(6);
+      const iconName = this.getSkillIcon(skillId);
+      // Return empty — caller will use setIcon() with this name
+      return iconName;
+    }
+    const g = SESSION_GLYPHS.find((g) => g.id === session.glyph);
+    return g?.svg ?? SESSION_GLYPHS[0].svg;
   }
 
   // --- Session state memory: round-robin resume ---
@@ -3336,6 +3539,7 @@ const SKILLS: SkillDef[] = [
   { id: "vault-audit", label: "Vault Audit", description: "Audit vault structure — broken links, orphans, naming issues" },
   { id: "graph", label: "Graph", description: "Analyze knowledge graph — clusters, bridges, dependency depth" },
   { id: "graduate", label: "Graduate", description: "Promote buried transcript insights into standalone modules" },
+  { id: "whatsapp-digest", label: "WhatsApp Digest", description: "Analyze WhatsApp groups — action items, blindspots, vault staleness" },
 ];
 
 // --- Agent Tracker ---

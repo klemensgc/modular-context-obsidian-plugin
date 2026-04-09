@@ -1087,6 +1087,182 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
   font-family: var(--font-interface);
   display: flex;
   flex-direction: column;
+  transition: width 0.15s ease, min-width 0.15s ease;
+}
+
+/* --- Compact sidebar (48px, icon-only) --- */
+.mc-terminal-sidebar.is-compact {
+  width: 48px;
+  min-width: 48px;
+  align-items: center;
+  padding: 0;
+}
+
+.mc-terminal-sidebar.is-compact .mc-sidebar-toolbar {
+  justify-content: center;
+  padding: 8px 0 4px;
+}
+
+.mc-sidebar-collapse-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text-faint);
+  transition: color 0.15s, background 0.15s;
+}
+
+.mc-sidebar-collapse-btn:hover {
+  color: var(--text-normal);
+  background: var(--background-secondary);
+}
+
+.mc-sidebar-collapse-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Compact icon button — base for skills, sessions, controls */
+.mc-compact-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-faint);
+  transition: color 0.15s, background 0.15s;
+}
+
+.mc-compact-icon-btn:hover {
+  color: var(--text-normal);
+  background: var(--background-secondary);
+}
+
+.mc-compact-icon-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Active session glyph — orange */
+.mc-compact-icon-btn.mc-compact-session.is-active {
+  color: #EB670F;
+  background: rgba(235, 103, 15, 0.08);
+}
+
+/* Working session glyph — green pulse */
+.mc-compact-icon-btn.mc-compact-session.is-working {
+  color: #22c55e;
+  animation: mc-compact-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes mc-compact-pulse {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
+
+/* Compact skills area */
+.mc-compact-skills {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 0;
+}
+
+/* Compact sessions area */
+.mc-compact-sessions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 0;
+  flex: 1;
+}
+
+/* Compact divider */
+.mc-compact-divider {
+  width: 24px;
+  height: 1px;
+  background: var(--background-modifier-border);
+  margin: 4px auto;
+  flex-shrink: 0;
+}
+
+/* Compact layout controls */
+.mc-compact-layouts {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 0;
+}
+
+.mc-compact-layout-btn {
+  all: unset;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text-faint);
+  opacity: 0.5;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.mc-compact-layout-btn:hover {
+  opacity: 1;
+  color: var(--text-muted);
+}
+
+.mc-compact-layout-btn.is-active {
+  opacity: 1;
+  color: var(--text-normal);
+}
+
+.mc-compact-layout-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Compact footer */
+.mc-compact-footer {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 0;
+}
+
+/* --- Expanded mode: glyph in card header --- */
+.mc-sidebar-card-glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--text-faint);
+}
+
+.mc-sidebar-card-glyph svg {
+  width: 14px;
+  height: 14px;
+}
+
+.mc-sidebar-card.is-active .mc-sidebar-card-glyph {
+  color: #EB670F;
+}
+
+.mc-sidebar-card-glyph.is-working,
+.mc-sidebar-card.is-active .mc-sidebar-card-glyph.is-working {
+  color: #22c55e;
 }
 
 /* --- Sidebar sections --- */
@@ -2086,8 +2262,7 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
 }
 
 .mc-pane.is-focused {
-  outline: 2px solid #EB670F;
-  outline-offset: -2px;
+  box-shadow: inset 0 0 0 2px #EB670F;
   border-radius: 2px;
 }
 
