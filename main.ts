@@ -2218,10 +2218,8 @@ class TerminalView extends ItemView {
     this.tracker?.track(session, skill.id);
     // Skills always launch fresh (no session resume)
     const agentCmd = this.buildAgentCmd();
-    // Remove -c / -r flags for skill launch — skills need a fresh prompt
-    const freshCmd = agentCmd.replace(/ -[cr]\b.*$/, "");
     setTimeout(() => {
-      session.process.stdin?.write(freshCmd + "\r");
+      session.process.stdin?.write(agentCmd + "\r");
     }, 300);
     // Listen to raw stdout for ❯ prompt — much more reliable than polling terminal buffer
     let sent = false;
@@ -2416,11 +2414,10 @@ class TerminalView extends ItemView {
       this.renderSidebarCards();
       this.saveState();
 
-      // Auto-launch AI agent with round-robin session resume.
+      // Auto-launch AI agent (fresh session, no history resume).
       // Skip if name was provided (= skill launch, handled by launchSkill).
       if (!name) {
-        const sessionId = this.getNextSessionId();
-        const cmd = this.buildAgentCmd(sessionId ?? undefined);
+        const cmd = this.buildAgentCmd();
         setTimeout(() => session.process.stdin?.write(cmd + "\r"), 300);
       }
 
@@ -2699,7 +2696,6 @@ class TerminalView extends ItemView {
     let cmd = "claude";
     if (this.autoMode) cmd += " --dangerously-skip-permissions";
     if (sessionId) cmd += ` -r ${sessionId}`;
-    else cmd += " -c"; // No specific session → continue most recent
     return cmd;
   }
 
@@ -2824,6 +2820,33 @@ class OnboardingModal extends Modal {
       const stepText = step.createDiv({ cls: "mc-onboarding-step-text" });
       stepText.createEl("strong", { text: title });
       stepText.createSpan({ text: ` — ${desc}` });
+    });
+
+    // Settings: AI Provider toggle
+    contentEl.createEl("h4", { text: "Settings" });
+
+    const providerToggle = contentEl.createDiv({ cls: "mc-provider-toggle" });
+    providerToggle.createDiv({ cls: "mc-provider-toggle-label", text: "AI Provider" });
+    const segment = providerToggle.createDiv({ cls: "mc-provider-segment" });
+
+    const claudeBtn = segment.createEl("button", { cls: "mc-provider-segment-btn", text: "Claude Code" });
+    const codexBtn = segment.createEl("button", { cls: "mc-provider-segment-btn", text: "Codex" });
+
+    const updateActive = () => {
+      claudeBtn.classList.toggle("is-active", this.view.aiProvider === "claude");
+      codexBtn.classList.toggle("is-active", this.view.aiProvider === "codex");
+    };
+    updateActive();
+
+    claudeBtn.addEventListener("click", () => {
+      this.view.aiProvider = "claude";
+      updateActive();
+      this.view.saveCustomSkills();
+    });
+    codexBtn.addEventListener("click", () => {
+      this.view.aiProvider = "codex";
+      updateActive();
+      this.view.saveCustomSkills();
     });
 
     // Dashboard guide

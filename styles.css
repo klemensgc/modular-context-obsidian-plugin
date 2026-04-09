@@ -1884,6 +1884,53 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
   font-size: 13px;
 }
 
+/* --- Provider Segment Toggle (onboarding modal) --- */
+.mc-provider-toggle {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 10px 0 16px;
+}
+
+.mc-provider-toggle-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.mc-provider-segment {
+  display: inline-flex;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.mc-provider-segment-btn {
+  all: unset;
+  padding: 6px 16px;
+  font-family: var(--font-interface);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s, box-shadow 0.15s;
+  user-select: none;
+}
+
+.mc-provider-segment-btn:hover {
+  color: var(--text-normal);
+}
+
+.mc-provider-segment-btn.is-active {
+  color: var(--text-normal);
+  background: var(--background-primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
 /* --- Skill Marketplace Modal --- */
 
 .mc-marketplace-modal {
