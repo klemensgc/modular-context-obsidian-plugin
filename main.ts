@@ -1221,7 +1221,8 @@ class FullscreenManager {
     });
     this.overlay.addEventListener("wheel", (e) => e.stopPropagation());
 
-    // Escape to exit (only when autocomplete is not active)
+    // Escape to exit (only when autocomplete is not active).
+    // CAPTURE phase so we intercept BEFORE xterm.js eats the Escape key.
     this.overlay.addEventListener("keydown", (e: KeyboardEvent) => {
       if (e.key === "Escape" && !this.isRenaming) {
         const anyAutocomplete = this.view.sessions.some(
@@ -1233,7 +1234,7 @@ class FullscreenManager {
           this.exit();
         }
       }
-    });
+    }, true);
 
     document.body.appendChild(this.overlay);
 
