@@ -1245,6 +1245,9 @@ class FullscreenManager {
     this.renderFsTabs();
     this.setupActivityCallbacks();
 
+    // Sync sidebar fullscreen icon
+    this.view.updateFsIcon();
+
     // Animate in
     requestAnimationFrame(() => this.overlay?.classList.add("is-visible"));
 
@@ -1305,6 +1308,9 @@ class FullscreenManager {
     this.view.fs = null;
     this.view.renderLayout();
     this.view.renderTabs();
+
+    // Sync sidebar fullscreen icon
+    this.view.updateFsIcon();
 
     requestAnimationFrame(() => {
       this.view.activeSession?.fit();
@@ -1542,6 +1548,9 @@ class TerminalView extends ItemView {
   private sidebarPollInterval: ReturnType<typeof setInterval> | null = null;
   tracker: AgentTracker | null = null;
   autoMode = false;
+  aiProvider: "claude" | "codex" = "claude";
+  /** Session IDs already claimed by open terminals (prevents round-robin collisions). */
+  private usedSessionIds = new Set<string>();
   private sidebarDirty = true;
   /** @deprecated Use displayMode.layout. Kept until full Iter 10 cleanup. */
   inlineLayout: FullscreenLayout = "single";
@@ -1606,13 +1615,14 @@ class TerminalView extends ItemView {
       this.renderLayout();
       this.renderTabs();
 
-      // Auto-resume: launch Claude Code in all restored sessions
-      const claudeCmd = this.autoMode
-        ? `claude --dangerously-skip-permissions -c\r`
-        : `claude -c\r`;
+      // Auto-resume: launch AI agent in all restored sessions.
+      // Round-robin: each terminal gets a different past session.
+      this.usedSessionIds.clear();
       for (const session of this.sessions) {
+        const sessionId = this.getNextSessionId();
+        const cmd = this.buildAgentCmd(sessionId ?? undefined);
         setTimeout(() => {
-          session.process.stdin?.write(claudeCmd);
+          session.process.stdin?.write(cmd + "\r");
         }, 500);
       }
     }
@@ -1837,13 +1847,10 @@ class TerminalView extends ItemView {
     }
 
     const fsBtn = controls.createEl("button", { cls: "mc-sidebar-fs-btn" });
-    setIcon(fsBtn, this.fullscreenManager?.isOpen ? "minimize-2" : "maximize-2");
-    fsBtn.title = this.fullscreenManager?.isOpen ? "Exit fullscreen" : "Fullscreen";
+    this.updateFsIcon();
     fsBtn.addEventListener("click", () => {
       this.fullscreenManager?.toggle();
-      // Update icon after toggle
-      fsBtn.empty();
-      setIcon(fsBtn, this.fullscreenManager?.isOpen ? "minimize-2" : "maximize-2");
+      this.updateFsIcon();
     });
 
     // Divider
@@ -1898,6 +1905,7 @@ class TerminalView extends ItemView {
     pluginData.hiddenSkills = (this as any).hiddenSkills ?? [];
     pluginData.skillConfig = (this as any).skillConfig ?? {};
     pluginData.autoMode = this.autoMode ?? false;
+    pluginData.aiProvider = this.aiProvider ?? "claude";
     pluginData.layout = this.displayMode.layout;
     await src.saveData(pluginData);
   }
@@ -1910,6 +1918,7 @@ class TerminalView extends ItemView {
     (this as any).hiddenSkills = pluginData.hiddenSkills ?? [];
     (this as any).skillConfig = pluginData.skillConfig ?? {};
     this.autoMode = pluginData.autoMode ?? false;
+    this.aiProvider = pluginData.aiProvider ?? "claude";
     this.displayMode.layout = pluginData.layout ?? "single";
     this.inlineLayout = this.displayMode.layout; // legacy mirror
     (this as any).maxSessions = pluginData.maxSessions ?? 8;
@@ -1999,6 +2008,17 @@ class TerminalView extends ItemView {
     });
     editModal.open();
     labelInput.focus();
+  }
+
+  /** Keep the fullscreen toggle button icon in sync with actual state.
+   *  Called from buildSidebar, toggle click, enter(), and exit(). */
+  updateFsIcon() {
+    const btn = this.sidebarEl?.querySelector(".mc-sidebar-fs-btn") as HTMLElement | null;
+    if (!btn) return;
+    const isFs = this.fullscreenManager?.isOpen ?? false;
+    btn.empty();
+    setIcon(btn, isFs ? "minimize-2" : "maximize-2");
+    btn.title = isFs ? "Exit fullscreen" : "Fullscreen";
   }
 
   renderSidebarCards() {
@@ -2196,11 +2216,12 @@ class TerminalView extends ItemView {
     const session = this.createSession(skill.label);
     if (!session) return;
     this.tracker?.track(session, skill.id);
-    const claudeCmd = this.autoMode
-      ? `claude --dangerously-skip-permissions\r`
-      : `claude\r`;
+    // Skills always launch fresh (no session resume)
+    const agentCmd = this.buildAgentCmd();
+    // Remove -c / -r flags for skill launch — skills need a fresh prompt
+    const freshCmd = agentCmd.replace(/ -[cr]\b.*$/, "");
     setTimeout(() => {
-      session.process.stdin?.write(claudeCmd);
+      session.process.stdin?.write(freshCmd + "\r");
     }, 300);
     // Listen to raw stdout for ❯ prompt — much more reliable than polling terminal buffer
     let sent = false;
@@ -2394,6 +2415,15 @@ class TerminalView extends ItemView {
       this.renderLayout();
       this.renderSidebarCards();
       this.saveState();
+
+      // Auto-launch AI agent with round-robin session resume.
+      // Skip if name was provided (= skill launch, handled by launchSkill).
+      if (!name) {
+        const sessionId = this.getNextSessionId();
+        const cmd = this.buildAgentCmd(sessionId ?? undefined);
+        setTimeout(() => session.process.stdin?.write(cmd + "\r"), 300);
+      }
+
       return session;
     } catch (e) {
       console.error("[mc] createSession error:", e);
@@ -2614,6 +2644,63 @@ class TerminalView extends ItemView {
       this.paneSlots[fallbackIdx >= 0 ? fallbackIdx : 0] = focused;
     }
     return [...this.paneSlots];
+  }
+
+  // --- Session state memory: round-robin resume ---
+
+  /** Compute the Claude project dir path for session file lookups. */
+  private getClaudeProjectDir(): string {
+    const vaultPath = (this.app.vault.adapter as any).basePath as string;
+    const homedir = require("os").homedir();
+    const encoded = vaultPath.replace(/\//g, "-");
+    return require("path").join(homedir, ".claude", "projects", encoded);
+  }
+
+  /** Find the next unclaimed session ID for round-robin resume.
+   *  Returns null if no sessions available (= launch fresh). */
+  getNextSessionId(): string | null {
+    if (this.aiProvider !== "claude") return null; // Codex uses its own mechanism
+    try {
+      const fs = require("fs");
+      const path = require("path");
+      const projectDir = this.getClaudeProjectDir();
+      if (!fs.existsSync(projectDir)) return null;
+
+      const files: { id: string; mtime: number }[] = [];
+      for (const name of fs.readdirSync(projectDir)) {
+        if (!name.endsWith(".jsonl")) continue;
+        const id = name.replace(".jsonl", "");
+        const stat = fs.statSync(path.join(projectDir, name));
+        files.push({ id, mtime: stat.mtimeMs });
+      }
+      files.sort((a, b) => b.mtime - a.mtime);
+
+      for (const f of files) {
+        if (!this.usedSessionIds.has(f.id)) {
+          this.usedSessionIds.add(f.id);
+          return f.id;
+        }
+      }
+      return null; // All sessions claimed → launch fresh
+    } catch {
+      return null;
+    }
+  }
+
+  /** Build the shell command to launch the AI agent. */
+  buildAgentCmd(sessionId?: string): string {
+    if (this.aiProvider === "codex") {
+      let cmd = "codex";
+      if (this.autoMode) cmd += " --full-auto";
+      if (sessionId) cmd += ` resume ${sessionId}`;
+      return cmd;
+    }
+    // Default: Claude Code
+    let cmd = "claude";
+    if (this.autoMode) cmd += " --dangerously-skip-permissions";
+    if (sessionId) cmd += ` -r ${sessionId}`;
+    else cmd += " -c"; // No specific session → continue most recent
+    return cmd;
   }
 
   closeSession(session: TerminalSession) {
@@ -3511,8 +3598,22 @@ class MCSettingTab extends PluginSettingTab {
     containerEl.createEl("h2", { text: "Modular Context" });
     const data = await this.plugin.loadData() ?? {};
     new Setting(containerEl)
+      .setName("AI Provider")
+      .setDesc("Which AI coding agent to launch in new terminals")
+      .addDropdown((dropdown) => dropdown
+        .addOption("claude", "Claude Code")
+        .addOption("codex", "OpenAI Codex")
+        .setValue(data.aiProvider ?? "claude")
+        .onChange(async (value) => {
+          data.aiProvider = value;
+          await this.plugin.saveData(data);
+        })
+      );
+    new Setting(containerEl)
       .setName("Auto-mode")
-      .setDesc("Launch Claude Code with --dangerously-skip-permissions by default")
+      .setDesc((data.aiProvider ?? "claude") === "codex"
+        ? "Launch Codex with --full-auto by default"
+        : "Launch Claude Code with --dangerously-skip-permissions by default")
       .addToggle((toggle) => toggle
         .setValue(data.autoMode ?? false)
         .onChange(async (value) => {
