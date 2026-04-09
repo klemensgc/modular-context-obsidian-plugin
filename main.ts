@@ -1897,7 +1897,7 @@ class TerminalView extends ItemView {
     input.focus();
   }
 
-  private async saveCustomSkills() {
+  async saveCustomSkills() {
     const src = (this as any).plugin ?? (this.app as any).plugins?.plugins?.["modular-context"];
     if (!src) return;
     const pluginData = await src.loadData() ?? {};
