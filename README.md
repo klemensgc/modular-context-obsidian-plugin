@@ -2,7 +2,7 @@
 
 ![banner](banner.png)
 
-> AI-native knowledge terminal for Obsidian — agent dashboard, skills sidebar, wiki-link autocomplete, and the modular-context methodology. By receptionOS.
+> Frictionless multi-terminal AI agent management inside Obsidian — run Claude Code and Codex side-by-side with skills, session tracking, and split layouts. By receptionOS.
 
 ![Version](https://img.shields.io/github/v/release/klemensgc/modular-context-obsidian-plugin)
 ![License](https://img.shields.io/github/license/klemensgc/modular-context-obsidian-plugin)
@@ -13,30 +13,29 @@
 
 ## What is this?
 
-An Obsidian plugin that turns your vault into an **LLM Wiki** — a persistent, compounding knowledge base where AI agents do the bookkeeping and you focus on thinking.
+An Obsidian plugin that gives you **multiple AI coding terminals side-by-side** — each running Claude Code or Codex — with a skills dashboard, agent tracking, and split layouts. No context-switching between apps.
 
-**Terminal** — Real PTY terminal (zsh) inside Obsidian with multi-tab, wiki-link autocomplete `[[`, drag-and-drop, fullscreen with split layouts.
+**Multi-Terminal** — Real PTY shells with split/grid layouts (up to 8 panes). Each session has a unique visual glyph for instant recognition.
 
-**Agent Dashboard** — Skills sidebar to launch Claude Code sessions with one click. Working / To Review agent tracking. Auto-mode for autonomous operation.
+**Agent Dashboard** — One-click skill launcher, working/review states, session glyphs. Compact icon-only mode for maximum terminal space.
 
-**Methodology** — Opinionated vault structure: frontmatter standards, cadence-based staleness, three-layer architecture (Sources → Wiki → Schema).
+**Methodology** — Optional but powerful: frontmatter standards, cadence-based staleness, three-layer architecture (Sources → Wiki → Schema). Turns your vault into an LLM Wiki.
 
 ---
 
 ## Features
 
-- **Real PTY terminal** — Full zsh shell in a pseudo-terminal, not a basic command runner
-- **Multi-tab support** — Multiple terminal sessions with named, persistent tabs
-- **Wiki-link autocomplete** — Type `[[` inside the terminal to search vault notes
+- **Multi-terminal split layouts** — Single, side-by-side, stacked, 2×2, 2×3, 2×4 grid. Up to 8 concurrent sessions
+- **Session glyphs** — Unique geometric shapes per terminal for instant visual recognition. Skill-launched sessions inherit the skill icon
+- **Claude Code + Codex support** — Toggle AI provider in settings. Auto-launches on new terminal
 - **Skills sidebar** — One-click Claude Code agent sessions for recurring workflows
 - **Agent tracker** — Working / To Review / Standby states for running agents
-- **Custom skills** — Add your own via the `[+]` button (maps to `/skill-name` commands)
+- **Compact sidebar** — 48px icon-only mode. Collapse to maximize terminal space
+- **Fullscreen mode** — Terminal fills Obsidian with sidebar on the right. Escape to exit
+- **Real PTY terminal** — Full zsh shell in a pseudo-terminal, not a basic command runner
+- **Wiki-link autocomplete** — Type `[[` inside the terminal to search vault notes
 - **Drag-and-drop** — Drag files from Finder or Obsidian to paste shell-escaped paths
-- **Screenshot drop** — Drag macOS screenshot thumbnails directly into the terminal
-- **Fullscreen mode** — Expand terminal to fill Obsidian with split layouts (single, side-by-side, stacked, grid)
-- **Terminal bookmarks** — Mark important output positions with scrollbar indicators
-- **Output capture** — Save terminal output to notes (Cmd+Shift+S)
-- **Session persistence** — Tab names and layout survive restarts
+- **Session persistence** — Tab names, glyphs, and layout survive restarts
 - **Auto-onboarding** — First install triggers a setup agent that builds your vault structure
 
 ---
@@ -128,7 +127,7 @@ Add custom skills with the **[+]** button. Each skill maps to a Claude Code `/sk
 
 - **macOS** (desktop only — uses Python PTY for real terminal)
 - **Python 3** (included with macOS)
-- **Claude Code CLI** (for agent skills — [install guide](https://docs.anthropic.com/en/docs/claude-code/overview))
+- **Claude Code CLI** or **Codex CLI** (for agent skills — [Claude install guide](https://docs.anthropic.com/en/docs/claude-code/overview))
 
 ---
 
@@ -141,7 +140,7 @@ Add custom skills with the **[+]** button. Each skill maps to a Claude Code `/sk
 
 ### Terminal basics
 
-- **`+`** — New tab (new zsh session)
+- **`+`** — New session (auto-launches Claude Code or Codex)
 - **Double-click** tab name — Rename it
 - **`[[`** — Wiki-link autocomplete from inside the terminal
 - **Drag files** onto the terminal — Pastes shell-escaped path
@@ -154,9 +153,17 @@ Click any skill in the sidebar to launch a Claude Code session that executes it.
 - **To Review** — Agent finished, output ready for your review
 - **Standby** — Dismissed but still available
 
+### AI Provider
+
+Toggle between Claude Code and Codex in the (i) modal → Settings section. Each new terminal uses the selected provider.
+
+### Compact sidebar
+
+Click the chevron at the top of the sidebar to collapse to icon-only mode (48px). Click again to expand. Always starts expanded.
+
 ### Auto-mode
 
-Toggle in the sidebar. When enabled, Claude Code runs with `--dangerously-skip-permissions` for fully autonomous operation. **Off by default** — enable when you trust the agent to work independently.
+Toggle in the sidebar. When enabled, Claude Code runs with `--dangerously-skip-permissions` (or Codex with `--full-auto`) for fully autonomous operation. **Off by default** — enable when you trust the agent to work independently.
 
 ---
 
@@ -188,7 +195,7 @@ Copy `main.js`, `manifest.json`, and `styles.css` to your vault's `.obsidian/plu
 
 ## Credits
 
-Built on [internetvin-terminal](https://github.com/internetvin/internetvin-terminal) by Vin Verma (MIT License). Extended with agent dashboard, skills sidebar, onboarding system, and the modular-context methodology.
+Built on [internetvin-terminal](https://github.com/internetvin/internetvin-terminal) by Vin Verma (MIT License). Extended with multi-terminal management, agent dashboard, compact sidebar, Codex support, and the modular-context methodology.
 
 Inspired by Andrej Karpathy's [LLM Wiki](https://x.com/karpathy/status/1937538198696460718) concept.
 

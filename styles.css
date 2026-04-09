@@ -637,6 +637,20 @@
   opacity: 1;
 }
 
+/* Sidebar stays visible in fullscreen overlay — explicitly on the RIGHT */
+.mc-fullscreen-overlay > .mc-fullscreen-grid {
+  order: 1;
+  flex: 1;
+  min-width: 0;
+}
+
+.mc-fullscreen-overlay > .mc-terminal-sidebar {
+  order: 2;
+  flex-shrink: 0;
+  height: 100%;
+  border-left: 1px solid var(--background-modifier-border);
+}
+
 /* Ensure Obsidian menus render above the fullscreen overlay */
 body:has(.mc-fullscreen-overlay.is-visible) > .menu {
   z-index: 9999999;
@@ -2261,9 +2275,14 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
   background: var(--background-primary);
 }
 
-.mc-pane.is-focused {
-  box-shadow: inset 0 0 0 2px #EB670F;
+.mc-pane.is-focused::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 1px solid #EB670F;
   border-radius: 2px;
+  pointer-events: none;
+  z-index: 10;
 }
 
 /* Inside a .mc-pane wrapper, override the default absolute positioning of

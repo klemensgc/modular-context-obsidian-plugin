@@ -763,6 +763,8 @@ class TerminalSession {
       fontWeightBold: "600",
       theme: getObsidianTheme(),
       allowProposedApi: true,
+      macOptionIsMeta: false,
+      macOptionClickForcesSelection: false,
     });
 
     this.fitAddon = new FitAddon();
