@@ -1778,6 +1778,7 @@ class TerminalView extends ItemView {
       { key: "grid", label: "Grid 2×2", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="6" x2="11" y2="6"/></svg>' },
       { key: "grid-6", label: "Grid 2×3", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="4.3" x2="11" y2="4.3"/><line x1="1" y1="7.7" x2="11" y2="7.7"/></svg>' },
       { key: "grid-8", label: "Grid 2×4", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="3.5" x2="11" y2="3.5"/><line x1="1" y1="6" x2="11" y2="6"/><line x1="1" y1="8.5" x2="11" y2="8.5"/></svg>' },
+      { key: "grid-12", label: "Grid 3×4", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="4" y1="1" x2="4" y2="11"/><line x1="8" y1="1" x2="8" y2="11"/><line x1="1" y1="3.5" x2="11" y2="3.5"/><line x1="1" y1="6" x2="11" y2="6"/><line x1="1" y1="8.5" x2="11" y2="8.5"/></svg>' },
     ];
     for (const l of layouts) {
       const btn = layoutGroup.createEl("button", { cls: "mc-sidebar-layout-btn" });
@@ -1785,7 +1786,13 @@ class TerminalView extends ItemView {
       btn.title = l.label;
       if (l.key === this.displayMode.layout) btn.addClass("is-active");
       btn.addEventListener("click", () => {
-        this.setLayout(l.key as any);
+        // Grid-12 always enters fullscreen
+        if (l.key === "grid-12" && !this.fullscreenManager?.isOpen) {
+          this.fullscreenManager?.enter(l.key as any);
+          this.updateFsIcon();
+        } else {
+          this.setLayout(l.key as any);
+        }
         layoutGroup.querySelectorAll(".mc-sidebar-layout-btn").forEach((b, i) => {
           b.classList.toggle("is-active", layouts[i].key === l.key);
         });
@@ -2064,6 +2071,7 @@ class TerminalView extends ItemView {
       { key: "split-h", label: "Side by side", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/></svg>' },
       { key: "split-v", label: "Stacked", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="1" y1="6" x2="11" y2="6"/></svg>' },
       { key: "grid", label: "Grid 2×2", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="6" x2="11" y2="6"/></svg>' },
+      { key: "grid-12", label: "Grid 3×4", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="4" y1="1" x2="4" y2="11"/><line x1="8" y1="1" x2="8" y2="11"/><line x1="1" y1="3.5" x2="11" y2="3.5"/><line x1="1" y1="6" x2="11" y2="6"/><line x1="1" y1="8.5" x2="11" y2="8.5"/></svg>' },
     ];
     for (const l of layouts) {
       const btn = layoutArea.createEl("button", { cls: "mc-compact-layout-btn" });
@@ -2071,7 +2079,12 @@ class TerminalView extends ItemView {
       btn.title = l.label;
       if (l.key === this.displayMode.layout) btn.addClass("is-active");
       btn.addEventListener("click", () => {
-        this.setLayout(l.key as any);
+        if (l.key === "grid-12" && !this.fullscreenManager?.isOpen) {
+          this.fullscreenManager?.enter(l.key as any);
+          this.updateFsIcon();
+        } else {
+          this.setLayout(l.key as any);
+        }
         layoutArea.querySelectorAll(".mc-compact-layout-btn").forEach((b, i) => {
           b.classList.toggle("is-active", layouts[i].key === l.key);
         });
@@ -2602,6 +2615,8 @@ class TerminalView extends ItemView {
       if (!name) {
         const cmd = this.buildAgentCmd();
         setTimeout(() => session.process.stdin?.write(cmd + "\r"), 300);
+        // Track as working so it appears in Working section immediately
+        this.tracker?.track(session, session.name);
       }
 
       return session;
@@ -3549,8 +3564,8 @@ const SKILLS: SkillDef[] = [
 // --- Agent Tracker ---
 
 const MIN_DWELL_MS = 5000;       // minimum time in any state before transition
-const IDLE_PROMPT_MS = 15000;     // idle + shell prompt → to-review
-const IDLE_SAFETY_MS = 90000;     // idle safety net → to-review regardless
+const IDLE_PROMPT_MS = 8000;      // idle + prompt visible → to-review
+const IDLE_SAFETY_MS = 30000;     // idle safety net → to-review regardless
 const REVIVE_BYTES = 200;         // bytes needed to revive from to-review
 const REVIVE_WINDOW_MS = 5000;    // window for revive byte counting
 const AUTO_DETECT_WINDOW_MS = 8000; // window for auto-detect
@@ -3717,6 +3732,20 @@ class AgentTracker {
     return false;
   }
 
+  /** Check if the terminal is idle at Claude Code's input prompt (❯).
+   *  This means Claude finished its task and is waiting for the next user message.
+   *  Distinct from "active" — active means Claude is producing output. */
+  private isAtClaudePrompt(session: TerminalSession): boolean {
+    const lines = this.getRecentLines(session, 5);
+    if (lines.length === 0) return false;
+    // Claude Code prompt is ❯ (sometimes with space). Must be the LAST non-empty line.
+    const last = lines[0];
+    if (/^❯\s*$/.test(last)) return true;
+    // Also check for the "tips" line that appears after completion
+    if (/^❯/.test(last) && last.length < 10) return true;
+    return false;
+  }
+
   /** Check if Claude Code appears active in the terminal buffer */
   private isClaudeCodeActive(session: TerminalSession): boolean {
     return this.hasClaudeTuiMarkers(this.getRecentLines(session, 30));
@@ -3766,10 +3795,9 @@ class AgentTracker {
         const session = sessions.find((s) => s.id === t.sessionId);
         if (!session) continue;
 
-        // Only check completion marker in last 3 lines AND when idle >2s
-        // Prevents false positives from old markers still in buffer after revive
+        // Check completion marker in last 15 lines (buffer scrolls, 3 was too few)
         if (idleMs > 2000) {
-          const tailLines = this.getRecentLines(session, 3);
+          const tailLines = this.getRecentLines(session, 15);
           if (this.hasClaudeCompletionMarker(tailLines)) {
             t.status = "to-review";
             t.stateChangedAt = now;
@@ -3779,14 +3807,21 @@ class AgentTracker {
           }
         }
 
-        // Primary: idle + shell prompt visible → done
-        if (idleMs > IDLE_PROMPT_MS && this.isShellPrompt(session)) {
+        // Primary: idle at Claude Code prompt (❯) = agent finished, waiting for input
+        if (idleMs > IDLE_PROMPT_MS && this.isAtClaudePrompt(session)) {
           t.status = "to-review";
           t.stateChangedAt = now;
           t.recentOutputBytes = 0;
           changed = true;
         }
-        // Safety net: very long idle → done regardless
+        // Secondary: idle at shell prompt = Claude Code exited
+        else if (idleMs > IDLE_PROMPT_MS && this.isShellPrompt(session)) {
+          t.status = "to-review";
+          t.stateChangedAt = now;
+          t.recentOutputBytes = 0;
+          changed = true;
+        }
+        // Safety net: long idle → done regardless
         else if (idleMs > IDLE_SAFETY_MS) {
           t.status = "to-review";
           t.stateChangedAt = now;
