@@ -1245,14 +1245,24 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
   height: 14px;
 }
 
-/* Compact footer */
-.mc-compact-footer {
-  margin-top: auto;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 8px 0;
+/* Spacer — pushes bottom sections down */
+.mc-sidebar-spacer {
+  flex: 1;
+  min-height: 8px;
 }
+
+/* Compact new button — bottom-anchored */
+.mc-compact-new {
+  margin: 4px auto 8px;
+  flex-shrink: 0;
+}
+
+/* Expanded: new session button at very bottom */
+.mc-sidebar-new-session-btn {
+  flex-shrink: 0;
+}
+
+/* Expanded: new session button at very bottom */
 
 /* --- Expanded mode: glyph in card header --- */
 .mc-sidebar-card-glyph {
@@ -1277,6 +1287,11 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
 .mc-sidebar-card-glyph.is-working,
 .mc-sidebar-card.is-active .mc-sidebar-card-glyph.is-working {
   color: #22c55e;
+}
+
+.mc-sidebar-card-glyph.is-review,
+.mc-sidebar-card.is-active .mc-sidebar-card-glyph.is-review {
+  color: var(--interactive-accent);
 }
 
 /* --- Sidebar sections --- */
@@ -2395,6 +2410,13 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
 .mc-fullscreen-grid[data-mode="fullscreen"][data-layout="grid-8"] {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr 1fr 1fr;
+  gap: 4px;
+}
+
+.mc-fullscreen-grid[data-mode="fullscreen"][data-layout="grid-12"] {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
   grid-template-rows: 1fr 1fr 1fr 1fr;
   gap: 4px;
 }

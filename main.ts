@@ -1130,7 +1130,7 @@ class TerminalSession {
 
 // --- FullscreenManager ---
 
-type FullscreenLayout = "single" | "split-h" | "split-v" | "grid" | "grid-6" | "grid-8";
+type FullscreenLayout = "single" | "split-h" | "split-v" | "grid" | "grid-6" | "grid-8" | "grid-12";
 
 /** Session glyphs — 8 distinct geometric shapes for visual terminal identification.
  *  Stroke-only SVGs, 14×14, designed to be distinguishable at small sizes. */
@@ -1143,6 +1143,10 @@ const SESSION_GLYPHS: { id: string; svg: string }[] = [
   { id: "star",     svg: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M7 1 L8.8 5.2 L13 5.2 L9.6 8 L10.8 12.5 L7 9.8 L3.2 12.5 L4.4 8 L1 5.2 L5.2 5.2 Z"/></svg>' },
   { id: "cross",    svg: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M7 2 L7 12 M2 7 L12 7"/></svg>' },
   { id: "chevron",  svg: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 3 L8 7 L3 11 M7 3 L12 7 L7 11"/></svg>' },
+  { id: "arrow",    svg: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 7 L12 7 M8 3 L12 7 L8 11"/></svg>' },
+  { id: "dot3",     svg: '<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><circle cx="3" cy="7" r="1.5"/><circle cx="7" cy="7" r="1.5"/><circle cx="11" cy="7" r="1.5"/></svg>' },
+  { id: "slash",    svg: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M10 2 L4 12"/></svg>' },
+  { id: "wave",     svg: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M1 7 C3 3, 5 3, 7 7 C9 11, 11 11, 13 7"/></svg>' },
 ];
 
 /** Number of pane slots for each layout. Used by computeVisible() and renderLayout(). */
@@ -1153,6 +1157,7 @@ const SLOT_COUNT: Record<FullscreenLayout, number> = {
   "grid": 4,
   "grid-6": 6,
   "grid-8": 8,
+  "grid-12": 12,
 };
 
 /** Display mode is the single source of truth for "what mode + which layout".
@@ -1420,6 +1425,7 @@ class FullscreenManager {
       { key: "grid", label: "Grid 2×2", svg: '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="6" x2="11" y2="6"/></svg>' },
       { key: "grid-6", label: "Grid 2×3", svg: '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="4.3" x2="11" y2="4.3"/><line x1="1" y1="7.7" x2="11" y2="7.7"/></svg>' },
       { key: "grid-8", label: "Grid 2×4", svg: '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="3.5" x2="11" y2="3.5"/><line x1="1" y1="6" x2="11" y2="6"/><line x1="1" y1="8.5" x2="11" y2="8.5"/></svg>' },
+      { key: "grid-12", label: "Grid 3×4", svg: '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="4" y1="1" x2="4" y2="11"/><line x1="8" y1="1" x2="8" y2="11"/><line x1="1" y1="3.5" x2="11" y2="3.5"/><line x1="1" y1="6" x2="11" y2="6"/><line x1="1" y1="8.5" x2="11" y2="8.5"/></svg>' },
     ];
 
     for (const l of layouts) {
@@ -1759,9 +1765,40 @@ class TerminalView extends ItemView {
       return;
     }
 
-    // --- EXPANDED MODE (default, unchanged) ---
+    // --- EXPANDED MODE ---
 
-    // --- Dashboard section ---
+    // --- TOP: Layout controls + fullscreen ---
+    const layoutSection = this.sidebarEl.createDiv({ cls: "mc-sidebar-section" });
+    const controls = layoutSection.createDiv({ cls: "mc-sidebar-controls" });
+    const layoutGroup = controls.createDiv({ cls: "mc-sidebar-layout-group" });
+    const layouts: { key: string; label: string; svg: string }[] = [
+      { key: "single", label: "Single", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/></svg>' },
+      { key: "split-h", label: "Side by side", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/></svg>' },
+      { key: "split-v", label: "Stacked", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="1" y1="6" x2="11" y2="6"/></svg>' },
+      { key: "grid", label: "Grid 2×2", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="6" x2="11" y2="6"/></svg>' },
+      { key: "grid-6", label: "Grid 2×3", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="4.3" x2="11" y2="4.3"/><line x1="1" y1="7.7" x2="11" y2="7.7"/></svg>' },
+      { key: "grid-8", label: "Grid 2×4", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="3.5" x2="11" y2="3.5"/><line x1="1" y1="6" x2="11" y2="6"/><line x1="1" y1="8.5" x2="11" y2="8.5"/></svg>' },
+    ];
+    for (const l of layouts) {
+      const btn = layoutGroup.createEl("button", { cls: "mc-sidebar-layout-btn" });
+      btn.innerHTML = l.svg;
+      btn.title = l.label;
+      if (l.key === this.displayMode.layout) btn.addClass("is-active");
+      btn.addEventListener("click", () => {
+        this.setLayout(l.key as any);
+        layoutGroup.querySelectorAll(".mc-sidebar-layout-btn").forEach((b, i) => {
+          b.classList.toggle("is-active", layouts[i].key === l.key);
+        });
+      });
+    }
+    const fsBtn = controls.createEl("button", { cls: "mc-sidebar-fs-btn" });
+    this.updateFsIcon();
+    fsBtn.addEventListener("click", () => {
+      this.fullscreenManager?.toggle();
+      this.updateFsIcon();
+    });
+
+    // --- Skills section ---
     const dashSection = this.sidebarEl.createDiv({ cls: "mc-sidebar-section" });
     dashSection.createDiv({ cls: "mc-sidebar-section-header", text: "Skills" });
 
@@ -1792,8 +1829,6 @@ class TerminalView extends ItemView {
     addBtn.addEventListener("click", () => {
       this.showAddSkillInput(secondaryGrid, addBtn);
     });
-
-    // Skill Library button
     const libraryBtn = secondaryGrid.createDiv({ cls: "mc-sidebar-skill-btn is-secondary mc-sidebar-library-btn" });
     const libIcon = libraryBtn.createDiv({ cls: "mc-sidebar-skill-icon" });
     setIcon(libIcon, "package");
@@ -1828,8 +1863,6 @@ class TerminalView extends ItemView {
         });
       }
     }
-
-    // Auto-mode checkbox
     const autoRow = dashSection.createDiv({ cls: "mc-sidebar-auto-mode" });
     const checkbox = autoRow.createEl("input", { type: "checkbox" }) as HTMLInputElement;
     checkbox.checked = this.autoMode;
@@ -1839,68 +1872,34 @@ class TerminalView extends ItemView {
     });
     autoRow.createSpan({ text: "Auto-mode", cls: "mc-sidebar-auto-label" });
 
-    // --- Standby section (regular terminals + dismissed) ---
+    // --- BOTTOM SECTION: pinned to bottom via spacer ---
+    const spacer = this.sidebarEl.createDiv({ cls: "mc-sidebar-spacer" });
+
+    // Standby (top of bottom group)
     const standbySection = this.sidebarEl.createDiv({ cls: "mc-sidebar-section" });
     standbySection.createDiv({ cls: "mc-sidebar-section-header", text: "Standby" });
     this.standbyEl = standbySection.createDiv({ cls: "mc-sidebar-cards" });
-    const newBtn = standbySection.createDiv({ cls: "mc-sidebar-new-session-btn" });
+
+    // To Review
+    const revSection = this.sidebarEl.createDiv({ cls: "mc-sidebar-section" });
+    revSection.createDiv({ cls: "mc-sidebar-section-header", text: "To Review" });
+    this.reviewEl = revSection.createDiv({ cls: "mc-sidebar-cards" });
+
+    // Working
+    const workSection = this.sidebarEl.createDiv({ cls: "mc-sidebar-section" });
+    workSection.createDiv({ cls: "mc-sidebar-section-header", text: "Working" });
+    this.workingEl = workSection.createDiv({ cls: "mc-sidebar-cards" });
+
+    // + New (very bottom)
+    const newBtn = this.sidebarEl.createDiv({ cls: "mc-sidebar-new-session-btn" });
     const newBtnIcon = newBtn.createDiv({ cls: "mc-sidebar-new-session-icon" });
     setIcon(newBtnIcon, "plus");
     newBtn.createSpan({ text: "New" });
     newBtn.addEventListener("click", () => this.createSession());
 
-    // --- Working section (tracked agents) ---
-    const workSection = this.sidebarEl.createDiv({ cls: "mc-sidebar-section" });
-    workSection.createDiv({ cls: "mc-sidebar-section-header", text: "Working" });
-    this.workingEl = workSection.createDiv({ cls: "mc-sidebar-cards" });
-
-    // --- To Review section ---
-    const revSection = this.sidebarEl.createDiv({ cls: "mc-sidebar-section" });
-    revSection.createDiv({ cls: "mc-sidebar-section-header", text: "To Review" });
-    this.reviewEl = revSection.createDiv({ cls: "mc-sidebar-cards" });
-
-    // --- Footer: controls + logo ---
+    // Footer: ROS logo centered
     const footer = this.sidebarEl.createDiv({ cls: "mc-sidebar-footer" });
-
-    // Layout controls
-    const controls = footer.createDiv({ cls: "mc-sidebar-controls" });
-
-    const layoutGroup = controls.createDiv({ cls: "mc-sidebar-layout-group" });
-    const layouts: { key: string; label: string; svg: string }[] = [
-      { key: "single", label: "Single", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/></svg>' },
-      { key: "split-h", label: "Side by side", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/></svg>' },
-      { key: "split-v", label: "Stacked", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="1" y1="6" x2="11" y2="6"/></svg>' },
-      { key: "grid", label: "Grid 2×2", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="6" x2="11" y2="6"/></svg>' },
-      { key: "grid-6", label: "Grid 2×3", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="4.3" x2="11" y2="4.3"/><line x1="1" y1="7.7" x2="11" y2="7.7"/></svg>' },
-      { key: "grid-8", label: "Grid 2×4", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="3.5" x2="11" y2="3.5"/><line x1="1" y1="6" x2="11" y2="6"/><line x1="1" y1="8.5" x2="11" y2="8.5"/></svg>' },
-    ];
-    for (const l of layouts) {
-      const btn = layoutGroup.createEl("button", { cls: "mc-sidebar-layout-btn" });
-      btn.innerHTML = l.svg;
-      btn.title = l.label;
-      // Single source of truth — view.displayMode.layout
-      if (l.key === this.displayMode.layout) btn.addClass("is-active");
-      btn.addEventListener("click", () => {
-        // setLayout works the same in inline and fullscreen
-        this.setLayout(l.key as any);
-        // Re-highlight active
-        layoutGroup.querySelectorAll(".mc-sidebar-layout-btn").forEach((b, i) => {
-          b.classList.toggle("is-active", layouts[i].key === l.key);
-        });
-      });
-    }
-
-    const fsBtn = controls.createEl("button", { cls: "mc-sidebar-fs-btn" });
-    this.updateFsIcon();
-    fsBtn.addEventListener("click", () => {
-      this.fullscreenManager?.toggle();
-      this.updateFsIcon();
-    });
-
-    // Divider
     footer.createDiv({ cls: "mc-sidebar-footer-divider" });
-
-    // ROS logo
     const logo = footer.createDiv({ cls: "mc-sidebar-logo" });
     setIcon(logo, "ros-signet");
     logo.title = "ReceptionOS";
@@ -1965,7 +1964,7 @@ class TerminalView extends ItemView {
     this.aiProvider = pluginData.aiProvider ?? "claude";
     this.displayMode.layout = pluginData.layout ?? "single";
     this.inlineLayout = this.displayMode.layout; // legacy mirror
-    (this as any).maxSessions = pluginData.maxSessions ?? 8;
+    (this as any).maxSessions = pluginData.maxSessions ?? 12;
   }
 
   private getVisibleSkills(): any[] {
@@ -2058,43 +2057,7 @@ class TerminalView extends ItemView {
    *  Called from buildSidebar, toggle click, enter(), and exit(). */
   /** Build the compact (icon-only) sidebar variant. */
   private buildCompactSidebar() {
-    // --- Skills: top 4 primary as icon buttons ---
-    const skillsArea = this.sidebarEl.createDiv({ cls: "mc-compact-skills" });
-    const allSkills = this.getVisibleSkills();
-    const primarySkills = allSkills.filter((s: any) => s.primary).slice(0, 4);
-    for (const skill of primarySkills) {
-      const btn = skillsArea.createDiv({ cls: "mc-compact-icon-btn" });
-      setIcon(btn, this.getSkillIcon(skill.id));
-      btn.title = skill.label;
-      btn.addEventListener("click", () => this.launchSkill(skill));
-      btn.addEventListener("contextmenu", (e: MouseEvent) => this.showSkillMenu(e, skill));
-    }
-
-    // Info button (compact)
-    const infoBtn = skillsArea.createDiv({ cls: "mc-compact-icon-btn" });
-    setIcon(infoBtn, "info");
-    infoBtn.title = "About this plugin";
-    infoBtn.addEventListener("click", () => new OnboardingModal(this.app, this).open());
-
-    // Divider
-    this.sidebarEl.createDiv({ cls: "mc-compact-divider" });
-
-    // --- Sessions: glyph icons ---
-    const sessionsArea = this.sidebarEl.createDiv({ cls: "mc-compact-sessions" });
-    this.standbyEl = sessionsArea;
-    this.workingEl = sessionsArea;
-    this.reviewEl = sessionsArea;
-
-    // "+" new session button
-    const newBtn = sessionsArea.createDiv({ cls: "mc-compact-icon-btn mc-compact-new" });
-    setIcon(newBtn, "plus");
-    newBtn.title = "New session";
-    newBtn.addEventListener("click", () => this.createSession());
-
-    // Divider
-    this.sidebarEl.createDiv({ cls: "mc-compact-divider" });
-
-    // --- Layout controls: vertical ---
+    // --- TOP: Layout controls (vertical) + fullscreen ---
     const layoutArea = this.sidebarEl.createDiv({ cls: "mc-compact-layouts" });
     const layouts: { key: string; label: string; svg: string }[] = [
       { key: "single", label: "Single", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/></svg>' },
@@ -2114,8 +2077,6 @@ class TerminalView extends ItemView {
         });
       });
     }
-
-    // Fullscreen toggle
     const fsBtn = layoutArea.createEl("button", { cls: "mc-compact-layout-btn mc-sidebar-fs-btn" });
     this.updateFsIcon();
     fsBtn.addEventListener("click", () => {
@@ -2123,12 +2084,39 @@ class TerminalView extends ItemView {
       this.updateFsIcon();
     });
 
-    // --- Footer: ROS logo ---
-    const footer = this.sidebarEl.createDiv({ cls: "mc-compact-footer" });
-    const logo = footer.createDiv({ cls: "mc-sidebar-logo" });
-    setIcon(logo, "ros-signet");
-    logo.title = "ReceptionOS";
-    logo.addEventListener("click", () => window.open("https://www.linkedin.com/company/receptionos/", "_blank"));
+    // Divider
+    this.sidebarEl.createDiv({ cls: "mc-compact-divider" });
+
+    // --- Skills: top 4 primary as icon buttons ---
+    const skillsArea = this.sidebarEl.createDiv({ cls: "mc-compact-skills" });
+    const allSkills = this.getVisibleSkills();
+    const primarySkills = allSkills.filter((s: any) => s.primary).slice(0, 4);
+    for (const skill of primarySkills) {
+      const btn = skillsArea.createDiv({ cls: "mc-compact-icon-btn" });
+      setIcon(btn, this.getSkillIcon(skill.id));
+      btn.title = skill.label;
+      btn.addEventListener("click", () => this.launchSkill(skill));
+      btn.addEventListener("contextmenu", (e: MouseEvent) => this.showSkillMenu(e, skill));
+    }
+    const infoBtn = skillsArea.createDiv({ cls: "mc-compact-icon-btn" });
+    setIcon(infoBtn, "info");
+    infoBtn.title = "About this plugin";
+    infoBtn.addEventListener("click", () => new OnboardingModal(this.app, this).open());
+
+    // --- SPACER: pushes sessions + new to bottom ---
+    this.sidebarEl.createDiv({ cls: "mc-sidebar-spacer" });
+
+    // --- Sessions: glyph icons (bottom-anchored) ---
+    const sessionsArea = this.sidebarEl.createDiv({ cls: "mc-compact-sessions" });
+    this.standbyEl = sessionsArea;
+    this.workingEl = sessionsArea;
+    this.reviewEl = sessionsArea;
+
+    // "+" new session button (very bottom)
+    const newBtn = this.sidebarEl.createDiv({ cls: "mc-compact-icon-btn mc-compact-new" });
+    setIcon(newBtn, "plus");
+    newBtn.title = "New session";
+    newBtn.addEventListener("click", () => this.createSession());
 
     this.renderSidebarCards();
   }
@@ -2305,16 +2293,30 @@ class TerminalView extends ItemView {
       const card = this.reviewEl.createDiv({ cls: "mc-sidebar-card is-review" });
       if (session && session === this.activeSession) card.addClass("is-active");
       const cardHeader = card.createDiv({ cls: "mc-sidebar-card-header" });
+      // Glyph icon before name (same style as working)
+      if (session) {
+        const rGlyphEl = cardHeader.createDiv({ cls: "mc-sidebar-card-glyph is-review" });
+        if (session.glyph.startsWith("skill:")) {
+          setIcon(rGlyphEl, this.getSkillIcon(session.glyph.slice(6)));
+        } else {
+          const g = SESSION_GLYPHS.find((g) => g.id === session.glyph);
+          rGlyphEl.innerHTML = g?.svg ?? SESSION_GLYPHS[0].svg;
+        }
+      }
       cardHeader.createSpan({ cls: "mc-sidebar-card-name", text: t.skillName });
+      if (this.sessions.length > 1 && session) {
+        const closeBtn = cardHeader.createDiv({ cls: "mc-sidebar-card-close" });
+        setIcon(closeBtn, "x");
+        closeBtn.title = "Close";
+        closeBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          this.closeSession(session);
+        });
+      }
 
-      const actions = card.createDiv({ cls: "mc-sidebar-card-actions" });
-      const dismissBtn = actions.createEl("button", { cls: "mc-sidebar-card-action is-dismiss", text: "Dismiss" });
-      dismissBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        this.tracker?.dismiss(t.sessionId);
-      });
-
+      // Click = mark as reviewed (dismiss) + switch to session
       card.addEventListener("click", () => {
+        this.tracker?.dismiss(t.sessionId);
         if (session) this.switchTo(session);
       });
     }
@@ -2555,7 +2557,7 @@ class TerminalView extends ItemView {
 
   createSession(name?: string): TerminalSession | null {
     try {
-      const max = (this as any).maxSessions ?? 8;
+      const max = (this as any).maxSessions ?? 12;
       if (this.sessions.length >= max) {
         new Notice(`Max ${max} sessions. Close one first.`);
         return null;
@@ -3854,7 +3856,7 @@ class MCSettingTab extends PluginSettingTab {
       .setName("Max sessions")
       .setDesc("Maximum concurrent terminal sessions (1–20)")
       .addText((text) => text
-        .setValue(String(data.maxSessions ?? 8))
+        .setValue(String(data.maxSessions ?? 12))
         .onChange(async (value) => {
           const num = parseInt(value, 10);
           if (!isNaN(num) && num >= 1 && num <= 20) {
