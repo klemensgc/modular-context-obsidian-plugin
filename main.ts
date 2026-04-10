@@ -947,19 +947,16 @@ class TerminalSession {
       }
     }
 
-    // 2. In-memory image data (e.g. macOS screenshot thumbnail dragged before
-    //    it's saved to disk). The File object exists but has no .path.
-    //    Read the blob, write it to a temp file, then paste that path.
+    // 2. Files without .path (e.g. macOS screenshot thumbnails, or files from
+    //    some apps that don't expose the filesystem path). Save blob to tmp,
+    //    then paste that path. Works for any file type, not just images.
     if (paths.length === 0 && e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
-      const imageFiles: File[] = [];
+      const blobFiles: File[] = [];
       for (let i = 0; i < e.dataTransfer.files.length; i++) {
-        const file = e.dataTransfer.files[i];
-        if (file.type.startsWith("image/")) {
-          imageFiles.push(file);
-        }
+        blobFiles.push(e.dataTransfer.files[i]);
       }
-      if (imageFiles.length > 0) {
-        this.saveDroppedImages(imageFiles);
+      if (blobFiles.length > 0) {
+        this.saveDroppedFiles(blobFiles);
         return; // async path handles writing to shell
       }
     }
@@ -1011,26 +1008,34 @@ class TerminalSession {
     this.showDropBadge(paths);
   }
 
-  /** Save in-memory image blobs (e.g. macOS screenshot thumbnails) to tmp files,
-   *  then paste the paths into the shell. */
-  private async saveDroppedImages(files: File[]) {
+  /** Save dropped file blobs to tmp files, then paste paths into the shell.
+   *  Works for any file type — images, PDFs, docs, etc. */
+  private async saveDroppedFiles(files: File[]) {
     const os = require("os");
     const fs = require("fs");
     const pathMod = require("path");
     const saved: string[] = [];
 
     for (const file of files) {
-      const ext = file.type.split("/")[1]?.replace("jpeg", "jpg") || "png";
+      // Derive extension from MIME type or filename
+      let ext = "bin";
+      if (file.name && file.name.includes(".")) {
+        ext = file.name.split(".").pop() || "bin";
+      } else if (file.type) {
+        ext = file.type.split("/")[1]?.replace("jpeg", "jpg") || "bin";
+      }
       const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-      const name = `drop-${ts}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
-      const tmpPath = pathMod.join(os.tmpdir(), name);
+      const safeName = file.name
+        ? file.name.replace(/[^a-zA-Z0-9._-]/g, "_")
+        : `drop-${ts}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
+      const tmpPath = pathMod.join(os.tmpdir(), safeName);
 
       try {
         const buf = Buffer.from(await file.arrayBuffer());
         fs.writeFileSync(tmpPath, buf);
         saved.push(tmpPath);
       } catch (err) {
-        console.error("[modular-context] failed to save dropped image:", err);
+        console.error("[modular-context] failed to save dropped file:", err);
       }
     }
 
@@ -1866,15 +1871,6 @@ class TerminalView extends ItemView {
         });
       }
     }
-    const autoRow = dashSection.createDiv({ cls: "mc-sidebar-auto-mode" });
-    const checkbox = autoRow.createEl("input", { type: "checkbox" }) as HTMLInputElement;
-    checkbox.checked = this.autoMode;
-    checkbox.addEventListener("change", () => {
-      this.autoMode = checkbox.checked;
-      this.saveCustomSkills();
-    });
-    autoRow.createSpan({ text: "Auto-mode", cls: "mc-sidebar-auto-label" });
-
     // --- BOTTOM SECTION: pinned to bottom via spacer ---
     const spacer = this.sidebarEl.createDiv({ cls: "mc-sidebar-spacer" });
 
@@ -1893,12 +1889,22 @@ class TerminalView extends ItemView {
     workSection.createDiv({ cls: "mc-sidebar-section-header", text: "Working" });
     this.workingEl = workSection.createDiv({ cls: "mc-sidebar-cards" });
 
-    // + New (very bottom)
-    const newBtn = this.sidebarEl.createDiv({ cls: "mc-sidebar-new-session-btn" });
+    // + New + Auto-mode (bottom row)
+    const bottomRow = this.sidebarEl.createDiv({ cls: "mc-sidebar-bottom-row" });
+    const newBtn = bottomRow.createDiv({ cls: "mc-sidebar-new-session-btn" });
     const newBtnIcon = newBtn.createDiv({ cls: "mc-sidebar-new-session-icon" });
     setIcon(newBtnIcon, "plus");
     newBtn.createSpan({ text: "New" });
     newBtn.addEventListener("click", () => this.createSession());
+
+    const autoRow = bottomRow.createDiv({ cls: "mc-sidebar-auto-mode" });
+    const checkbox = autoRow.createEl("input", { type: "checkbox" }) as HTMLInputElement;
+    checkbox.checked = this.autoMode;
+    checkbox.addEventListener("change", () => {
+      this.autoMode = checkbox.checked;
+      this.saveCustomSkills();
+    });
+    autoRow.createSpan({ text: "Auto", cls: "mc-sidebar-auto-label" });
 
     // Footer: ROS logo centered
     const footer = this.sidebarEl.createDiv({ cls: "mc-sidebar-footer" });

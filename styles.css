@@ -1277,11 +1277,14 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
 }
 
 /* Expanded: new session button at very bottom */
-.mc-sidebar-new-session-btn {
+/* Bottom row: + New on left, Auto-mode on right */
+.mc-sidebar-bottom-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 8px;
   flex-shrink: 0;
 }
-
-/* Expanded: new session button at very bottom */
 
 /* --- Expanded mode: glyph in card header --- */
 .mc-sidebar-card-glyph {
@@ -1359,10 +1362,8 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
 .mc-sidebar-new-session-btn {
   display: flex;
   align-items: center;
-  justify-content: center;
   gap: 6px;
-  padding: 8px 12px;
-  margin-top: 6px;
+  padding: 6px 12px;
   border: 1px dashed var(--background-modifier-border);
   border-radius: 8px;
   cursor: pointer;
@@ -1371,6 +1372,11 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
   font-weight: 500;
   color: var(--text-muted);
   transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.mc-sidebar-bottom-row .mc-sidebar-auto-mode {
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .mc-sidebar-new-session-btn:hover {
