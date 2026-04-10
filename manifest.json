@@ -1,7 +1,7 @@
 {
 	"id": "modular-context",
 	"name": "Modular Context",
-	"version": "1.4.5",
+	"version": "1.4.6",
 	"minAppVersion": "0.15.0",
 	"description": "Frictionless multi-terminal AI agent management inside Obsidian — Claude Code & Codex side-by-side with skills dashboard and split layouts.",
 	"author": "klemensgc / receptionOS",

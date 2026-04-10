@@ -1739,25 +1739,31 @@ class TerminalView extends ItemView {
     this.sidebarEl.empty();
     this.sidebarEl.classList.toggle("is-compact", this.sidebarCompact);
 
-    // --- Collapse/Expand toggle ---
+    // --- Toolbar: collapse (left) | info (center) | fullscreen (right) ---
     const toolbar = this.sidebarEl.createDiv({ cls: "mc-sidebar-toolbar" });
-    const collapseBtn = toolbar.createDiv({ cls: "mc-sidebar-collapse-btn" });
+    const collapseBtn = toolbar.createDiv({ cls: "mc-sidebar-toolbar-btn" });
     setIcon(collapseBtn, this.sidebarCompact ? "chevron-left" : "chevron-right");
     collapseBtn.title = this.sidebarCompact ? "Expand sidebar" : "Collapse sidebar";
     collapseBtn.addEventListener("click", () => {
       this.sidebarCompact = !this.sidebarCompact;
       this.buildSidebar();
-      // Refit terminals after sidebar width change
       requestAnimationFrame(() => {
         for (const s of this.computeVisible(this.displayMode.layout)) s.fit();
       });
     });
 
     if (!this.sidebarCompact) {
-      const infoBtn = toolbar.createDiv({ cls: "mc-sidebar-info-btn" });
+      const infoBtn = toolbar.createDiv({ cls: "mc-sidebar-toolbar-btn" });
       setIcon(infoBtn, "info");
       infoBtn.title = "About this plugin";
       infoBtn.addEventListener("click", () => new OnboardingModal(this.app, this).open());
+
+      const fsBtn = toolbar.createDiv({ cls: "mc-sidebar-toolbar-btn mc-sidebar-fs-btn" });
+      this.updateFsIcon();
+      fsBtn.addEventListener("click", () => {
+        this.fullscreenManager?.toggle();
+        this.updateFsIcon();
+      });
     }
 
     if (this.sidebarCompact) {
@@ -1767,17 +1773,14 @@ class TerminalView extends ItemView {
 
     // --- EXPANDED MODE ---
 
-    // --- TOP: Layout controls + fullscreen ---
+    // --- Layout controls (5 main layouts, one row) ---
     const layoutSection = this.sidebarEl.createDiv({ cls: "mc-sidebar-section" });
-    const controls = layoutSection.createDiv({ cls: "mc-sidebar-controls" });
-    const layoutGroup = controls.createDiv({ cls: "mc-sidebar-layout-group" });
+    const layoutGroup = layoutSection.createDiv({ cls: "mc-sidebar-layout-group" });
     const layouts: { key: string; label: string; svg: string }[] = [
       { key: "single", label: "Single", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/></svg>' },
       { key: "split-h", label: "Side by side", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/></svg>' },
       { key: "split-v", label: "Stacked", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="1" y1="6" x2="11" y2="6"/></svg>' },
       { key: "grid", label: "Grid 2×2", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="6" x2="11" y2="6"/></svg>' },
-      { key: "grid-6", label: "Grid 2×3", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="4.3" x2="11" y2="4.3"/><line x1="1" y1="7.7" x2="11" y2="7.7"/></svg>' },
-      { key: "grid-8", label: "Grid 2×4", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="3.5" x2="11" y2="3.5"/><line x1="1" y1="6" x2="11" y2="6"/><line x1="1" y1="8.5" x2="11" y2="8.5"/></svg>' },
       { key: "grid-12", label: "Grid 3×4", svg: '<svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="4" y1="1" x2="4" y2="11"/><line x1="8" y1="1" x2="8" y2="11"/><line x1="1" y1="3.5" x2="11" y2="3.5"/><line x1="1" y1="6" x2="11" y2="6"/><line x1="1" y1="8.5" x2="11" y2="8.5"/></svg>' },
     ];
     for (const l of layouts) {
@@ -1786,7 +1789,6 @@ class TerminalView extends ItemView {
       btn.title = l.label;
       if (l.key === this.displayMode.layout) btn.addClass("is-active");
       btn.addEventListener("click", () => {
-        // Grid-12 always enters fullscreen
         if (l.key === "grid-12" && !this.fullscreenManager?.isOpen) {
           this.fullscreenManager?.enter(l.key as any);
           this.updateFsIcon();
@@ -1798,12 +1800,6 @@ class TerminalView extends ItemView {
         });
       });
     }
-    const fsBtn = controls.createEl("button", { cls: "mc-sidebar-fs-btn" });
-    this.updateFsIcon();
-    fsBtn.addEventListener("click", () => {
-      this.fullscreenManager?.toggle();
-      this.updateFsIcon();
-    });
 
     // --- Skills section ---
     const dashSection = this.sidebarEl.createDiv({ cls: "mc-sidebar-section" });

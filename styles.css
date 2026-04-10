@@ -1117,7 +1117,8 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
   padding: 8px 0 4px;
 }
 
-.mc-sidebar-collapse-btn {
+/* Toolbar icon buttons — shared style for collapse, info, fullscreen */
+.mc-sidebar-toolbar-btn {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1125,18 +1126,35 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
   height: 22px;
   border-radius: 4px;
   cursor: pointer;
-  color: var(--text-faint);
-  transition: color 0.15s, background 0.15s;
+  color: var(--text-muted);
+  opacity: 0.8;
+  transition: color 0.15s, opacity 0.15s;
 }
 
-.mc-sidebar-collapse-btn:hover {
+.mc-sidebar-toolbar-btn:hover {
   color: var(--text-normal);
-  background: var(--background-secondary);
+  opacity: 1;
 }
 
-.mc-sidebar-collapse-btn svg {
+.mc-sidebar-toolbar-btn svg {
   width: 14px;
   height: 14px;
+}
+
+/* Collapse button stays on the left (first child) */
+.mc-sidebar-toolbar-btn:first-child {
+  margin-right: auto;
+}
+
+/* Fullscreen button on the right (last child) */
+.mc-sidebar-toolbar-btn:last-child {
+  margin-left: auto;
+}
+
+/* When 3 items: left auto-right auto-left keeps info centered */
+.mc-sidebar-toolbar-btn:nth-child(2) {
+  margin-left: auto;
+  margin-right: auto;
 }
 
 /* Compact icon button — base for skills, sessions, controls */
@@ -1195,7 +1213,6 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
   align-items: center;
   gap: 2px;
   padding: 4px 0;
-  flex: 1;
 }
 
 /* Compact divider */
@@ -1226,18 +1243,20 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
   border-radius: 4px;
   cursor: pointer;
   color: var(--text-faint);
-  opacity: 0.5;
-  transition: opacity 0.15s, color 0.15s;
+  opacity: 0.3;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
 }
 
 .mc-compact-layout-btn:hover {
-  opacity: 1;
-  color: var(--text-muted);
+  opacity: 0.8;
+  color: var(--text-normal);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .mc-compact-layout-btn.is-active {
   opacity: 1;
-  color: var(--text-normal);
+  color: #EB670F;
+  background: rgba(235, 103, 15, 0.08);
 }
 
 .mc-compact-layout-btn svg {
@@ -1251,9 +1270,9 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
   min-height: 8px;
 }
 
-/* Compact new button — bottom-anchored */
+/* Compact new button — very bottom */
 .mc-compact-new {
-  margin: 4px auto 8px;
+  margin: 6px auto 12px;
   flex-shrink: 0;
 }
 
@@ -1648,27 +1667,7 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
   flex-shrink: 0;
 }
 
-.mc-sidebar-info-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 4px;
-  cursor: pointer;
-  color: var(--text-faint);
-  transition: color 0.15s, background 0.15s;
-}
-
-.mc-sidebar-info-btn:hover {
-  color: var(--interactive-accent);
-  background: rgba(var(--interactive-accent-rgb, 0, 122, 255), 0.08);
-}
-
-.mc-sidebar-info-btn svg {
-  width: 14px;
-  height: 14px;
-}
+/* .mc-sidebar-info-btn — replaced by .mc-sidebar-toolbar-btn */
 
 /* --- Card close button --- */
 .mc-sidebar-card-close {
@@ -1710,53 +1709,45 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
 }
 
 /* Layout + fullscreen controls — inline icon row, same weight as section headers */
-.mc-sidebar-controls {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0;
-  width: 100%;
-  padding: 6px 10px;
-}
-
+/* Layout controls — single row, centered */
 .mc-sidebar-layout-group {
   display: flex;
   align-items: center;
-  gap: 0;
+  justify-content: center;
+  gap: 2px;
+  padding: 4px 10px 6px;
 }
 
-.mc-sidebar-layout-btn,
-.mc-sidebar-fs-btn {
+.mc-sidebar-layout-btn {
   all: unset;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 24px;
   height: 24px;
+  border-radius: 4px;
   cursor: pointer;
   color: var(--text-faint);
-  opacity: 0.5;
-  transition: opacity 0.15s, color 0.15s;
+  opacity: 0.3;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
 }
 
-.mc-sidebar-layout-btn:hover,
-.mc-sidebar-fs-btn:hover {
-  opacity: 1;
-  color: var(--text-muted);
+.mc-sidebar-layout-btn:hover {
+  opacity: 0.8;
+  color: var(--text-normal);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .mc-sidebar-layout-btn.is-active {
   opacity: 1;
-  color: var(--text-muted);
+  color: #EB670F;
+  background: rgba(235, 103, 15, 0.08);
 }
 
+/* Fullscreen button inherits .mc-sidebar-toolbar-btn style.
+   Only override needed for updateFsIcon() querySelector. */
 .mc-sidebar-fs-btn {
-  margin-left: 2px;
-}
-
-.mc-sidebar-fs-btn svg {
-  width: 13px;
-  height: 13px;
+  /* marker class — no extra styles needed */
 }
 
 .mc-sidebar-logo {
