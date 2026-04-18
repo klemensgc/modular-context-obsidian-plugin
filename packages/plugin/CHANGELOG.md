@@ -18,7 +18,7 @@ First stable release. Graduates v1.5 / v1.6 / v1.7 beta milestones into one prod
 - **OAuth**: hybrid Quick Connect (shared client, <100 users Testing mode) + BYO (user-provided client, unlimited). PKCE S256 desktop flow with ephemeral loopback redirect.
 - **Token storage**: Electron `safeStorage` (macOS Keychain / Windows DPAPI / Linux libsecret). Auto-refresh timer every 50 min, 5-min expiry buffer.
 - **Error taxonomy**: `TOKEN_MISSING`, `TOKEN_EXPIRED`, `TOKEN_INVALID`, `ACCOUNT_NOT_FOUND`, `SCOPE_OUTDATED`, `PERMISSION_DENIED`, `RATE_LIMITED`, `QUOTA_EXCEEDED`, `NETWORK_ERROR`, `UNKNOWN`.
-- **`mcp-google-workspace`** package graduated **1.1.0-beta.1 → 1.0.0 stable**.
+- **`mcp-google-workspace`** package graduated **1.1.0-beta.1 → 1.1.0 stable**.
 
 ### Architecture
 - **ADR-001** — Hybrid OAuth (Quick Connect + BYO) balancing beta quick-start with unlimited scaling post-CASA.
