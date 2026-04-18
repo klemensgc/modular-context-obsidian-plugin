@@ -74,7 +74,7 @@ First stable release. Graduates v1.5 / v1.6 / v1.7 beta milestones into one prod
 
 ---
 
-## v1.7.0-beta (unreleased) — Multi-account + full Gmail/Calendar control
+## v1.7.0-beta (never released — graduated into v2.0.0) — Multi-account + full Gmail/Calendar control
 
 Rozszerzenie MCP Google integracji o multiple accounts równolegle (do 100 na Testing mode) i 6 nowych tools dających pełną kontrolę nad skrzynką i kalendarzem.
 
@@ -122,7 +122,7 @@ Rozszerzenie MCP Google integracji o multiple accounts równolegle (do 100 na Te
 
 ---
 
-## v1.6.0-beta (unreleased) — Google Workspace W2 (MCP Server for Claude Code)
+## v1.6.0-beta (never released — graduated into v2.0.0) — Google Workspace W2 (MCP Server for Claude Code)
 
 Ships standalone MCP server exposing Gmail + Calendar as native tools for Claude Code sessions. Plugin now writes `.mcp.json` automatically on Connect.
 
@@ -166,7 +166,7 @@ Ships standalone MCP server exposing Gmail + Calendar as native tools for Claude
 
 ---
 
-## v1.5.0-beta (unreleased) — Google Workspace W1 (OAuth + Storage + UI)
+## v1.5.0-beta (never released — graduated into v2.0.0) — Google Workspace W1 (OAuth + Storage + UI)
 
 First release of Google Workspace integration foundation. OAuth flow + encrypted token storage + onboarding UI. MCP server (W2) and flagship skills (W3) coming next.
 

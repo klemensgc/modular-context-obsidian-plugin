@@ -1,8 +1,11 @@
 ---
 title: ADR-002 — Token Storage
 updated: 2026-04-17
-status: accepted
+status: accepted (see [addendum](ADR-002-addendum-safestorage-pivot.md) for W1 implementation pivot)
 ---
+> ⚠️ **Implementation pivot:** During W1 implementation, `@napi-rs/keyring` was replaced with Electron `safeStorage` (OS keychain-backed, no native-binding bundling issues). See [ADR-002 addendum](ADR-002-addendum-safestorage-pivot.md) for rationale.
+> The original decision below is preserved as historical record.
+
 # ADR-002: Token Storage — @napi-rs/keyring + AES-256-GCM encrypted file
 
 ## Context

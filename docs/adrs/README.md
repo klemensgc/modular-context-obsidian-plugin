@@ -10,9 +10,10 @@ Each ADR is an immutable record at acceptance time. Later decisions override via
 |-----|-------|--------|----------|
 | [001](ADR-001-oauth-strategy.md) | OAuth Strategy — Hybrid Quick Connect + BYO | accepted | 2026-04-17 |
 | [002](ADR-002-token-storage.md) | Token Storage — encrypted file + OS keychain | accepted | 2026-04-17 |
+| [002-addendum](ADR-002-addendum-safestorage-pivot.md) | safeStorage pivot (replaces @napi-rs/keyring) | accepted | 2026-04-17 |
 | [003](ADR-003-mcp-server-lifecycle.md) | MCP Server Lifecycle — standalone package, stdio spawned | accepted | 2026-04-17 |
 | [003-addendum](ADR-003-addendum-shared-state.md) | Shared-State Protocol (MCP ↔ Plugin) — plaintext credentials sidecar | accepted | 2026-04-18 |
-| [004](ADR-004-skill-registry-integration.md) | Skill Registry Integration — integration type + requires | accepted | 2026-04-17 |
+| [004](ADR-004-skill-registry-integration.md) | Skill Registry Integration — integration type + requires | **deferred** (v2.1+) | 2026-04-17 |
 | [005](ADR-005-multi-account-storage.md) | Multi-Account Storage Model — per-account folder + canonical index | accepted | 2026-04-18 |
 
 ## Status legend
@@ -23,6 +24,6 @@ Each ADR is an immutable record at acceptance time. Later decisions override via
 
 ## Notes on specific ADRs
 
-- **ADR-002 pivot:** Original text specifies `@napi-rs/keyring` as token storage primary. During W1 implementation we pivoted to Electron `safeStorage` because `@napi-rs/keyring` native bindings couldn't be bundled by esbuild in Obsidian plugin context. Shipped v2.0 uses safeStorage (OS keychain-backed). See ADR-003 addendum for downstream MCP-side consequences of this pivot.
-- **ADR-004 status:** Skill registry extensions (new `integration` type, `requires[]`, `postInstall` hooks) were accepted but **deferred** from v2.0 scope — not implemented. The gsuite-analysis skill in v2.0 uses the existing registry format without these extensions. Revisit for v2.1+.
+- **ADR-002 pivot:** Original text specifies `@napi-rs/keyring` as token storage primary. During W1 implementation we pivoted to Electron `safeStorage` — native bindings couldn't be bundled by esbuild. See [ADR-002 addendum](ADR-002-addendum-safestorage-pivot.md) for full rationale. Downstream MCP-side consequences: [ADR-003 addendum](ADR-003-addendum-shared-state.md).
+- **ADR-004 deferred:** Skill registry extensions (new `integration` type, `requires[]`, `postInstall` hooks) were accepted in principle but NOT shipped in v2.0. `gsuite-analysis` uses the existing registry format. Revisit when a second integration (Slack, Notion) is planned.
 - **ADR-003 addendum supersession:** Multi-account (ADR-005) changes the "single credentials.json sidecar" model. Server now reads per-account sidecars + index. See ADR-005 for current shape.

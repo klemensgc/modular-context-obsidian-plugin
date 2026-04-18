@@ -1,7 +1,9 @@
 ---
 title: ADR-004 — Skill Registry Integration
-updated: 2026-04-17
-status: accepted
+updated: 2026-04-18
+status: deferred
+ship-target: v2.1+
+notes: "Accepted in principle, not implemented in v2.0. The gsuite-analysis skill ships using the existing registry format without the extensions proposed below (integration type, requires[], postInstall hooks). Revisit when second integration (e.g. Slack, Notion) is planned."
 ---
 # ADR-004: Skill Registry Integration — New `integration` type + `requires` dependencies
 

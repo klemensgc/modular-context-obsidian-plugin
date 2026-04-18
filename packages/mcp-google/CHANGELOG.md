@@ -1,6 +1,6 @@
 # Changelog — @modular-context/mcp-google-workspace
 
-## v1.1.0 (unreleased) — Graduated stable
+## v1.1.0 — 2026-04-18 — Graduated stable
 
 Graduated from beta alongside Modular Context plugin v2.0.0. No API changes since 1.1.0-beta.1 — this release is the production-stable marker.
 

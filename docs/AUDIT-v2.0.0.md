@@ -72,46 +72,20 @@ Repo is in **healthy state post-release**. Ralph audit found **7 yellow issues**
 
 ---
 
-## Red ⛔ (user decision needed)
+## Red ⛔ → now resolved (user approved + Ralph applied 2026-04-18 follow-up)
 
-### R1 — ADR-002 pivot not reflected in ADR body
+### ~~R1~~ RESOLVED — ADR-002 pivot documented
+- Created `docs/adrs/ADR-002-addendum-safestorage-pivot.md` (Option C from recommendation)
+- ADR-002 header now has callout linking to addendum
+- Index README + notes section updated
 
-**Observed:** `docs/adrs/ADR-002-token-storage.md` says "@napi-rs/keyring + AES-256-GCM" as the accepted approach. During W1 implementation the project pivoted to Electron `safeStorage` because `@napi-rs/keyring` native bindings can't be bundled by esbuild in Obsidian plugin context. `ADR-003-addendum-shared-state.md` documents this pivot in context of MCP-side consequences, but the ADR-002 body itself isn't updated.
+### ~~R2~~ RESOLVED — ADR-004 marked deferred
+- Frontmatter: `status: deferred` + `ship-target: v2.1+` + notes field
+- Index README updated: "**deferred** (v2.1+)" in status column
 
-**Impact:** New contributors reading ADR-002 in isolation will get wrong mental model.
-
-**Options:**
-- A. Add **"Superseded-by: W1 implementation pivot"** note at top + link to addendum
-- B. Rewrite ADR-002 body to reflect `safeStorage` decision + preserve original as historical
-- C. Write new `ADR-002-addendum-safestorage-pivot.md`
-
-**Recommendation:** C — preserves ADR immutability convention while documenting the pivot clearly. One additional file, keeps original decision context.
-
-### R2 — ADR-004 accepted but not shipped in v2.0 (deferred)
-
-**Observed:** `docs/adrs/ADR-004-skill-registry-integration.md` frontmatter says `status: accepted`. It defines new `integration` skill type + `requires[]` + `postInstall` hooks. None of this shipped in v2.0 — the `gsuite-analysis` skill uses the existing registry format. Per internal notes, ADR-004 was "out of W2 scope" — effectively deferred.
-
-**Impact:** Doc suggests the extensions exist; code doesn't implement them.
-
-**Options:**
-- A. Change ADR-004 status → `deferred` + add note "ship target: v2.1"
-- B. Change to `rejected` if the extensions are no longer planned (cleanest if scope won't happen)
-- C. Implement the extensions in v2.1 before shipping more integrations
-
-**Recommendation:** A — most honest; preserves intent; revisit at v2.1 planning time. Audit `docs/adrs/README.md` already notes this under "Notes on specific ADRs" but ADR-004 itself isn't updated.
-
-### R3 — v1.6.0-beta / v1.7.0-beta entries in CHANGELOG still say "(unreleased)"
-
-**Observed:** CHANGELOG has headings `## v1.6.0-beta (unreleased)` and `## v1.7.0-beta (unreleased)` preserved from development. Technically correct (those betas never had their own git tags/releases — they graduated into v2.0.0) but visually ambiguous.
-
-**Impact:** Reader of CHANGELOG may be confused whether those versions exist somewhere or not.
-
-**Options:**
-- A. Leave as-is (historically accurate — they genuinely were never released standalone)
-- B. Add prefix: `## v1.6.0-beta (never released — graduated into v2.0.0)` for clarity
-- C. Collapse all beta entries into a single "Development milestones (v1.5-1.7 beta, graduated into v2.0.0)" section
-
-**Recommendation:** B — one-word addition, preserves audit trail, removes ambiguity.
+### ~~R3~~ RESOLVED — CHANGELOG beta headings clarified
+- 3 beta headings changed: `(unreleased)` → `(never released — graduated into v2.0.0)`
+- mcp-google CHANGELOG v1.1.0 also dated: `(unreleased)` → `2026-04-18`
 
 ---
 
