@@ -1,7 +1,7 @@
 {
   "name": "@modular-context/mcp-google-workspace",
-  "version": "1.1.0",
-  "description": "MCP server exposing Gmail + Calendar tools for Claude Code, designed for the modular-context Obsidian plugin",
+  "version": "1.3.0",
+  "description": "MCP server exposing Gmail, Calendar, Docs, Drive, Sheets, and Slides tools for Claude Code, designed for the modular-context Obsidian plugin",
   "license": "MIT",
   "main": "dist/index.js",
   "bin": {
@@ -35,6 +35,10 @@
     "model-context-protocol",
     "gmail",
     "google-calendar",
+    "google-docs",
+    "google-drive",
+    "google-sheets",
+    "google-slides",
     "claude-code",
     "obsidian"
   ]

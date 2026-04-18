@@ -1,6 +1,14 @@
 // googleapis wrappers + error mapping.
 
-import { gmail_v1, google, calendar_v3 } from "googleapis";
+import {
+  gmail_v1,
+  google,
+  calendar_v3,
+  drive_v3,
+  docs_v1,
+  sheets_v4,
+  slides_v1,
+} from "googleapis";
 import { MCGoogleError, MCPToolError } from "../types.js";
 
 export function createGmailClient(accessToken: string): gmail_v1.Gmail {
@@ -13,6 +21,30 @@ export function createCalendarClient(accessToken: string): calendar_v3.Calendar 
   const auth = new google.auth.OAuth2();
   auth.setCredentials({ access_token: accessToken });
   return google.calendar({ version: "v3", auth });
+}
+
+export function createDriveClient(accessToken: string): drive_v3.Drive {
+  const auth = new google.auth.OAuth2();
+  auth.setCredentials({ access_token: accessToken });
+  return google.drive({ version: "v3", auth });
+}
+
+export function createDocsClient(accessToken: string): docs_v1.Docs {
+  const auth = new google.auth.OAuth2();
+  auth.setCredentials({ access_token: accessToken });
+  return google.docs({ version: "v1", auth });
+}
+
+export function createSheetsClient(accessToken: string): sheets_v4.Sheets {
+  const auth = new google.auth.OAuth2();
+  auth.setCredentials({ access_token: accessToken });
+  return google.sheets({ version: "v4", auth });
+}
+
+export function createSlidesClient(accessToken: string): slides_v1.Slides {
+  const auth = new google.auth.OAuth2();
+  auth.setCredentials({ access_token: accessToken });
+  return google.slides({ version: "v1", auth });
 }
 
 /**

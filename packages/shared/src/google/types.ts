@@ -84,17 +84,33 @@ export enum MCGoogleError {
   NETWORK_ERROR = "NETWORK_ERROR",
   PERMISSION_DENIED = "PERMISSION_DENIED",
   RATE_LIMITED = "RATE_LIMITED",
+  DRIVE_API_ERROR = "DRIVE_API_ERROR",
+  DRIVE_FILE_NOT_FOUND = "DRIVE_FILE_NOT_FOUND",
+  DRIVE_UPLOAD_FAILED = "DRIVE_UPLOAD_FAILED",
+  DOCS_API_ERROR = "DOCS_API_ERROR",
+  DOCS_NOT_FOUND = "DOCS_NOT_FOUND",
+  SHEETS_API_ERROR = "SHEETS_API_ERROR",
+  SHEETS_NOT_FOUND = "SHEETS_NOT_FOUND",
+  SHEETS_INVALID_RANGE = "SHEETS_INVALID_RANGE",
+  SLIDES_API_ERROR = "SLIDES_API_ERROR",
+  SLIDES_NOT_FOUND = "SLIDES_NOT_FOUND",
   UNKNOWN = "UNKNOWN",
 }
 
 /**
- * Updated scope set (ADR-005 scope expansion):
- * - `gmail.modify` covers read + send + labels + archive + trash (replaces readonly + send)
- * - `calendar` (full) covers list-calendars + CRUD + freebusy (replaces calendar.events)
- * - OIDC: openid + email + profile (required for userinfo endpoint post-token-exchange)
+ * Updated scope set (v1.2 expansion — Docs + Drive):
+ * - `gmail.modify` covers read + send + labels + archive + trash
+ * - `calendar` (full) covers list-calendars + CRUD + freebusy
+ * - `drive.file` covers read/write files created/opened by the app
+ * - `drive.metadata.readonly` covers listing/searching files beyond app scope
+ * - `documents` covers full Docs read/write
+ * - OIDC: openid + email + profile (required for userinfo endpoint)
  *
- * Both restricted scopes (gmail.modify, calendar) require CASA for production,
+ * Restricted scopes (gmail.modify, calendar, drive.file) require CASA for production,
  * but Testing mode (<100 users) exempts them. See ADR-001 for rationale.
+ *
+ * Existing users upgrading from v1.1 must re-authenticate (SCOPE_OUTDATED surfaced
+ * via computeMissingScopes helper below).
  */
 export const GOOGLE_WORKSPACE_SCOPES = [
   "openid",
@@ -102,6 +118,11 @@ export const GOOGLE_WORKSPACE_SCOPES = [
   "profile",
   "https://www.googleapis.com/auth/gmail.modify",
   "https://www.googleapis.com/auth/calendar",
+  "https://www.googleapis.com/auth/drive.file",
+  "https://www.googleapis.com/auth/drive.metadata.readonly",
+  "https://www.googleapis.com/auth/documents",
+  "https://www.googleapis.com/auth/spreadsheets",
+  "https://www.googleapis.com/auth/presentations",
 ] as const;
 
 export type GoogleWorkspaceScope = (typeof GOOGLE_WORKSPACE_SCOPES)[number];

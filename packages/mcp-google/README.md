@@ -1,8 +1,8 @@
 # @modular-context/mcp-google-workspace
 
-MCP server exposing Gmail + Calendar tools to Claude Code. Designed to work with the [modular-context Obsidian plugin](https://github.com/klemensgc/modular-context-obsidian-plugin) — the plugin handles OAuth flow, token storage, and writes per-account credentials sidecars that this server reads on demand.
+MCP server exposing 25 Google Workspace tools to Claude Code — Gmail, Calendar, Drive, Docs, Sheets, Slides. Designed to work with the [modular-context Obsidian plugin](https://github.com/klemensgc/modular-context-obsidian-plugin) — the plugin handles OAuth flow, token storage, and writes per-account credentials sidecars that this server reads on demand.
 
-> **Status:** v1.1.0 stable — 10 tools, multi-account support. Part of Modular Context v2.0.
+> **Status:** v1.3.0 stable — 25 tools across 6 Google Workspace products, multi-account support. Part of Modular Context v2.1.
 
 ## Accounts
 
@@ -14,7 +14,7 @@ Multiple Google accounts can be connected simultaneously. Each tool accepts an o
 
 Plugin writes per-account credentials to `~/.modular-context/mcp-google/accounts/{filename}/credentials.json` with the index at `~/.modular-context/mcp-google/accounts-index.json`.
 
-## Tools (10)
+## Tools (25)
 
 **Gmail (4):**
 - `gmail_search` — query with Gmail syntax, optional body extraction
@@ -29,6 +29,29 @@ Plugin writes per-account credentials to `~/.modular-context/mcp-google/accounts
 - `calendar_update_event` — patch existing event
 - `calendar_delete_event` — delete event
 - `calendar_freebusy` — query busy windows across calendars
+
+**Drive (4):**
+- `drive_list_files` — list with Drive query syntax filter, pagination, ordering
+- `drive_search` — full-text search across content + names
+- `drive_download_file` — fetch content (Google-native auto-exported as text; binary → base64)
+- `drive_upload_file` — create with utf-8 or base64 content + optional parent folder
+
+**Docs (3):**
+- `docs_read_doc` — plain-text extraction walking body content (paragraphs + tables)
+- `docs_create_doc` — new doc with title + optional initial content
+- `docs_update_doc` — mode=append (at end) or mode=replace (wipe + insert)
+
+**Sheets (5):**
+- `sheets_list_sheets` — spreadsheet metadata + sheet tabs (titles, IDs, dimensions)
+- `sheets_read_range` — read A1-notation range, 2D string array
+- `sheets_write_range` — overwrite range, USER_ENTERED parses formulas/dates
+- `sheets_append_row` — append rows to data region end
+- `sheets_create_spreadsheet` — new spreadsheet with optional sheet tab titles
+
+**Slides (3):**
+- `slides_read_presentation` — metadata + plain-text per slide
+- `slides_create_presentation` — new presentation with title
+- `slides_add_slide` — insert slide with layout (BLANK / TITLE / TITLE_AND_BODY / SECTION_HEADER / TITLE_AND_TWO_COLUMNS / CAPTION_ONLY)
 
 Each tool definition:
 

@@ -2,7 +2,7 @@
 
 ![banner](banner.png)
 
-> *Your Obsidian vault as LLM-native knowledge base + multi-account Gmail & Calendar exposed as MCP tools for Claude Code. Local-first, encrypted, no telemetry.*
+> *Your Obsidian vault as LLM-native knowledge base + multi-account Google Workspace (Gmail, Calendar, Drive, Docs, Sheets, Slides) exposed as 25 MCP tools for Claude Code. Local-first, encrypted, no telemetry.*
 
 ![Version](https://img.shields.io/github/v/release/klemensgc/modular-context-obsidian-plugin)
 ![License](https://img.shields.io/github/license/klemensgc/modular-context-obsidian-plugin)
@@ -17,7 +17,7 @@
 
 1. **LLM Knowledge Base** — Your Obsidian vault structured as Sources → Wiki → Schema (Karpathy-aligned framing). Multi-terminal Claude Code + Codex with skills sidebar, agent tracking, session glyphs. Your second brain seen by LLMs as a first-class context.
 
-2. **G-Suite MCP Server** — Multi-account Gmail + Calendar exposed as 10 native tools for Claude Code (`gmail_search`, `gmail_send`, `calendar_freebusy`, …). OAuth 2.0 + PKCE desktop flow, tokens encrypted via Electron `safeStorage` (OS keychain), no telemetry, no cloud.
+2. **G-Suite MCP Server** — Multi-account Google Workspace (Gmail, Calendar, Drive, Docs, Sheets, Slides) exposed as 25 native tools for Claude Code (`gmail_search`, `drive_list_files`, `docs_create_doc`, `sheets_append_row`, `slides_read_presentation`, …). OAuth 2.0 + PKCE desktop flow, tokens encrypted via Electron `safeStorage` (OS keychain), no telemetry, no cloud.
 
 One install, one onboarding, two productivity frontiers.
 
@@ -85,10 +85,10 @@ One install, one onboarding, two productivity frontiers.
 - **Smart Session Restore** — on reopen, picker modal classifies saved sessions (Needs attention / Idle / Archive) instead of silent auto-resume. You choose what materializes — no accidental skill re-runs.
 - **Auto-onboarding** — first install triggers a setup agent that scaffolds your vault.
 
-### G-Suite MCP Server (v2.0 stable)
+### G-Suite MCP Server (v2.1 — 25 tools)
 
 - **Multi-account** — unlimited Google accounts in parallel (Testing mode: up to 100 test users per account)
-- **10 tools** for Claude Code (Gmail + Calendar — see table below)
+- **25 tools** for Claude Code across 6 Workspace products (Gmail ×4, Calendar ×6, Drive ×4, Docs ×3, Sheets ×5, Slides ×3 — see table below)
 - **Zero telemetry** — no metrics, no crash reports, no external calls beyond OAuth + Google API
 - **Local-first** — tokens encrypted via OS keychain (macOS Keychain / Windows DPAPI / Linux libsecret via `libsecret`)
 - **Auto-refresh** — 50-minute timer per account, 5-minute expiry buffer
@@ -103,13 +103,13 @@ One install, one onboarding, two productivity frontiers.
 |-------|---------|------|
 | **Synthesise Files** | Turn raw files (transcripts, notes, backlog) into vault modules — categorize, tag, update, reweave neighbors | Your vault, optional `_transcripts-backlog/` |
 | **WhatsApp Digest** | Analyze WhatsApp groups for action items, blindspots, staleness vs vault | macOS WhatsApp.app |
-| **Gmail + Calendar** | Inbox sweep, stale follow-ups, calendar gap analysis, meeting prep | MCP tools below |
+| **Gmail + G-Suite** | Inbox sweep, stale follow-ups, calendar gap analysis, meeting prep, doc extraction, sheet logging, deck prep | MCP tools below |
 
 All three write artifacts to `_workspace/{YYYY-MM}/w{N}/`. Secondary skills (Pulse, Brief, Log, Reweave, Graph, Graduate, Ideas, Vault-Audit) available in sidebar grid.
 
 ---
 
-## 10 MCP tools
+## 25 MCP tools
 
 ### Gmail (4)
 
@@ -131,9 +131,46 @@ All three write artifacts to `_workspace/{YYYY-MM}/w{N}/`. Secondary skills (Pul
 | `calendar_delete_event` | Delete. |
 | `calendar_freebusy` | Query busy windows across multiple calendars — ideal for "find time to meet". |
 
+### Drive (4)
+
+| Tool | Purpose |
+|------|---------|
+| `drive_list_files` | List with Drive query syntax filter, pagination, ordering. |
+| `drive_search` | Full-text search across file content + names. Optional `mimeType` filter. Excludes trashed. |
+| `drive_download_file` | Get file content. Google-native files auto-exported as text; binary returned as base64. |
+| `drive_upload_file` | Create file with content + optional `parentFolderId`. Supports utf-8 / base64. |
+
+### Docs (3)
+
+| Tool | Purpose |
+|------|---------|
+| `docs_read_doc` | Plain-text extraction from doc body (walks paragraphs + tables). |
+| `docs_create_doc` | New doc with title + optional `initialContent`. |
+| `docs_update_doc` | `mode: "append"` (at document end) or `mode: "replace"` (wipe body + insert). |
+
+### Sheets (5)
+
+| Tool | Purpose |
+|------|---------|
+| `sheets_list_sheets` | Spreadsheet metadata + list of sheet tabs. |
+| `sheets_read_range` | Read A1-notation range. Supports `majorDimension` + `valueRenderOption`. |
+| `sheets_write_range` | Overwrite values at range. `USER_ENTERED` parses formulas + dates. |
+| `sheets_append_row` | Append row(s) to data region end. |
+| `sheets_create_spreadsheet` | New spreadsheet with optional initial sheet titles. |
+
+### Slides (3)
+
+| Tool | Purpose |
+|------|---------|
+| `slides_read_presentation` | Metadata + plain-text summary per slide. |
+| `slides_create_presentation` | New presentation with title. |
+| `slides_add_slide` | Insert slide with layout (BLANK / TITLE / TITLE_AND_BODY / SECTION_HEADER / TITLE_AND_TWO_COLUMNS / CAPTION_ONLY). |
+
 **Every tool accepts optional `account` param** (email, case-insensitive). Omit → primary account. Unknown email → `ACCOUNT_NOT_FOUND` error.
 
-**OAuth scopes required:** `gmail.modify`, `calendar`, plus OIDC `openid email profile`.
+**OAuth scopes required** (10 total): `gmail.modify`, `calendar`, `drive.file`, `drive.metadata.readonly`, `documents`, `spreadsheets`, `presentations`, plus OIDC `openid email profile`.
+
+**Google Cloud setup:** Enable 6 APIs in your OAuth project — Gmail, Calendar, Drive, Docs, Sheets, Slides. Missing API returns `PERMISSION_DENIED` with direct enable link.
 
 ---
 
@@ -167,7 +204,7 @@ Monorepo with three packages:
 modular-context-obsidian-plugin/
 ├── packages/
 │   ├── plugin/        ← Obsidian plugin (main.ts, manifest, features + MCP client glue)
-│   ├── mcp-google/    ← standalone MCP server (Gmail + Calendar tools, 10 tools, Node)
+│   ├── mcp-google/    ← standalone MCP server (25 Google Workspace tools, Node)
 │   ├── shared/        ← portable types + AgentTracker + PTY helper + UI primitives
 │   └── app/           ← experimental standalone Electron app (WIP, not shipped)
 ├── README.md          ← you are here
@@ -177,7 +214,7 @@ modular-context-obsidian-plugin/
 
 - **[packages/plugin/CHANGELOG.md](packages/plugin/CHANGELOG.md)** — user-facing release notes (v1.0 → v2.0)
 - **[packages/plugin/RELEASE-v2.0.0.md](packages/plugin/RELEASE-v2.0.0.md)** — v2.0 release highlights
-- **[packages/mcp-google/README.md](packages/mcp-google/README.md)** — MCP server docs (10 tools, accounts, env contract)
+- **[packages/mcp-google/README.md](packages/mcp-google/README.md)** — MCP server docs (25 tools, accounts, env contract)
 - **[packages/mcp-google/CHANGELOG.md](packages/mcp-google/CHANGELOG.md)** — MCP server version history
 - Skill library: separate repo [klemensgc/modular-context-skills](https://github.com/klemensgc/modular-context-skills) — plugin auto-syncs
 

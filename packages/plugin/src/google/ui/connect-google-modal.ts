@@ -26,13 +26,26 @@ export interface ConnectGoogleModalOptions {
   onStateChange?: (state: ConnectGoogleState) => void;
 }
 
+const GOOGLE_ICON_SVG_MARKUP = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="18" height="18" aria-hidden="true"><path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"/><path fill="#FF3D00" d="M6.306 14.691l6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 16.318 4 9.656 8.337 6.306 14.691z"/><path fill="#4CAF50" d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238A11.91 11.91 0 0 1 24 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z"/><path fill="#1976D2" d="M43.611 20.083H42V20H24v8h11.303a12.04 12.04 0 0 1-4.087 5.571l.003-.002 6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z"/></svg>`;
+
 const SCOPE_DESCRIPTIONS: Record<string, string> = {
-  "https://www.googleapis.com/auth/gmail.readonly":
-    "Read Gmail messages — for search and context",
-  "https://www.googleapis.com/auth/gmail.send":
-    "Create email drafts (never auto-sent without your click)",
-  "https://www.googleapis.com/auth/calendar.events":
-    "Read and create calendar events on your primary calendar",
+  openid: "Sign in to fetch your account email",
+  email: "Read your Google account email address",
+  profile: "Read basic Google profile info (name)",
+  "https://www.googleapis.com/auth/gmail.modify":
+    "Read, draft, send, and label Gmail messages",
+  "https://www.googleapis.com/auth/calendar":
+    "Full access to Calendar events, calendars, and free/busy windows",
+  "https://www.googleapis.com/auth/drive.file":
+    "Read and write Drive files created or opened by this plugin",
+  "https://www.googleapis.com/auth/drive.metadata.readonly":
+    "List and search Drive file metadata (no content access outside drive.file)",
+  "https://www.googleapis.com/auth/documents":
+    "Read, create, and edit Google Docs",
+  "https://www.googleapis.com/auth/spreadsheets":
+    "Read, create, and edit Google Sheets",
+  "https://www.googleapis.com/auth/presentations":
+    "Read, create, and edit Google Slides",
 };
 
 export class ConnectGoogleModal extends Modal {
@@ -95,7 +108,7 @@ export class ConnectGoogleModal extends Modal {
     const header = contentEl.createDiv({ cls: "mc-connect-google-header" });
     header.createEl("h2", { text: "Google Workspace" });
     header.createEl("p", {
-      text: "Gmail + Calendar as tools for Claude Code. Local-first, open-source.",
+      text: "Gmail, Calendar, Drive, Docs, Sheets, and Slides as tools for Claude Code. Local-first, open-source.",
       cls: "mc-connect-google-subtitle",
     });
 
@@ -141,8 +154,13 @@ export class ConnectGoogleModal extends Modal {
     // Quick Connect button (if available)
     if (hasQuickConnect) {
       const primary = container.createEl("button", {
-        text: "Connect with Quick Connect (beta)",
-        cls: "mc-oauth-button-primary",
+        cls: "mc-oauth-button-google",
+      });
+      const icon = primary.createSpan({ cls: "mc-oauth-button-google-icon" });
+      icon.innerHTML = GOOGLE_ICON_SVG_MARKUP;
+      primary.createSpan({
+        cls: "mc-oauth-button-google-label",
+        text: "Connect with Google",
       });
       primary.addEventListener("click", () => {
         this.useByo = false;
@@ -151,7 +169,7 @@ export class ConnectGoogleModal extends Modal {
     } else {
       const notice = container.createDiv({ cls: "mc-connect-google-notice" });
       notice.createEl("p", {
-        text: "Quick Connect unavailable in this build. Use 'Bring Your Own' below.",
+        text: "Quick Connect unavailable in this build. Use 'Advanced' below.",
       });
     }
 

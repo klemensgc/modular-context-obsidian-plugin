@@ -2,7 +2,7 @@
 // Multi-account aware (ADR-005).
 
 import { existsSync, rmSync } from "node:fs";
-import type { AccountId, StoredTokens } from "@mc/shared";
+import type { AccountId, AccountIndex, StoredTokens } from "@mc/shared";
 import { emailToAccountFilename, normalizeAccountId } from "@mc/shared";
 import {
   ACCOUNTS_DIR,
@@ -14,6 +14,7 @@ import {
   removeIndexEntry,
   upsertIndexEntry,
   writeAccountCredentials,
+  writeAccountsIndex,
 } from "./credentials-sidecar.js";
 import { removeMcpEntry, writeMcpConfig } from "./generator.js";
 import { ensureServerInstalled } from "./installer.js";
@@ -158,6 +159,81 @@ export function syncOnDisconnect(
       error: err,
     };
   }
+}
+
+/**
+ * Reconcile server-side sidecar with plugin-side authoritative account list.
+ *
+ * Plugin-side (vault `.modular-context/accounts-index.json` via safeStorage) is the
+ * source of truth. Server-side (`~/.modular-context/mcp-google/accounts-index.json`)
+ * must match it exactly — otherwise MCP server picks wrong primary, points at
+ * deleted folders (TOKEN_MISSING), or exposes removed accounts.
+ *
+ * Desync can happen when:
+ *  - Plugin is reloaded after manual sidecar deletion
+ *  - Account was added/removed while plugin was closed
+ *  - Migration between versions left stale entries
+ *
+ * This helper prunes sidecar entries not in pluginAccounts, updates scopes/timestamps
+ * for matched ones, and promotes the correct primary.
+ *
+ * Note: this does NOT re-create missing sidecar credentials. If plugin has an account
+ * but server-side credentials.json is missing, server will return TOKEN_MISSING until
+ * user reconnects that account. Reconciliation only aligns the index, not tokens.
+ */
+export function reconcileMcpSidecar(
+  pluginAccounts: AccountIndex[],
+  pluginPrimary: AccountId | null,
+): McpSyncResult {
+  try {
+    ensureSidecarDirs();
+    const pluginIds = new Set(pluginAccounts.map((a) => a.id));
+    const serverIndex = readAccountsIndex();
+
+    // Start from plugin list (source of truth), preserving server timestamps where available
+    const reconciled: AccountIndex[] = pluginAccounts.map((pa) => {
+      const existing = serverIndex.accounts.find((sa) => sa.id === pa.id);
+      return {
+        ...pa,
+        // Keep whichever connectedAt is older (first connection)
+        connectedAt: existing?.connectedAt ?? pa.connectedAt,
+        // Keep whichever lastRefreshed is newer
+        lastRefreshed: pickLatestIso(existing?.lastRefreshed, pa.lastRefreshed),
+        // Primary is decided by pluginPrimary; isPrimary set in writeAccountsIndex invariant fixup
+        isPrimary: pa.id === pluginPrimary,
+      };
+    });
+
+    // Delete orphaned sidecars (accounts in server but not in plugin)
+    for (const sa of serverIndex.accounts) {
+      if (!pluginIds.has(sa.id)) {
+        deleteAccountCredentials(sa.id);
+      }
+    }
+
+    writeAccountsIndex({
+      schemaVersion: 1,
+      primaryAccount: reconciled.length > 0 ? pluginPrimary : null,
+      accounts: reconciled,
+    });
+
+    return {
+      ok: true,
+      message: `MCP sidecar reconciled: ${reconciled.length} account(s)`,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      message: err instanceof Error ? err.message : "sidecar reconciliation failed",
+      error: err,
+    };
+  }
+}
+
+function pickLatestIso(a?: string, b?: string): string | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  return Date.parse(a) > Date.parse(b) ? a : b;
 }
 
 /**

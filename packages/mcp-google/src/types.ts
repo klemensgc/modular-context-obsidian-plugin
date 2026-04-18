@@ -11,6 +11,16 @@ export enum MCGoogleError {
   RATE_LIMITED = "RATE_LIMITED",
   QUOTA_EXCEEDED = "QUOTA_EXCEEDED",
   NETWORK_ERROR = "NETWORK_ERROR",
+  DRIVE_API_ERROR = "DRIVE_API_ERROR",
+  DRIVE_FILE_NOT_FOUND = "DRIVE_FILE_NOT_FOUND",
+  DRIVE_UPLOAD_FAILED = "DRIVE_UPLOAD_FAILED",
+  DOCS_API_ERROR = "DOCS_API_ERROR",
+  DOCS_NOT_FOUND = "DOCS_NOT_FOUND",
+  SHEETS_API_ERROR = "SHEETS_API_ERROR",
+  SHEETS_NOT_FOUND = "SHEETS_NOT_FOUND",
+  SHEETS_INVALID_RANGE = "SHEETS_INVALID_RANGE",
+  SLIDES_API_ERROR = "SLIDES_API_ERROR",
+  SLIDES_NOT_FOUND = "SLIDES_NOT_FOUND",
   UNKNOWN = "UNKNOWN",
 }
 
@@ -77,6 +87,122 @@ export interface CalendarEvent {
   location?: string;
   meetingLink?: string;
   htmlLink: string;
+}
+
+// Drive tool outputs
+export interface DriveFile {
+  id: string;
+  name: string;
+  mimeType: string;
+  modifiedTime?: string;
+  size?: string;
+  webViewLink?: string;
+}
+
+export interface DriveFileList {
+  files: DriveFile[];
+  nextPageToken: string | null;
+}
+
+export interface DriveFileContent {
+  id: string;
+  name: string;
+  mimeType: string;
+  /** utf-8 text OR base64-encoded binary */
+  content: string;
+  encoding: "utf-8" | "base64";
+}
+
+export interface DriveUploadResult {
+  id: string;
+  name: string;
+  mimeType: string;
+  webViewLink?: string;
+}
+
+// Docs tool outputs
+export interface DocDocument {
+  documentId: string;
+  title: string;
+  content: string;
+  revisionId?: string;
+  format: "plain";
+}
+
+export interface DocCreateResult {
+  documentId: string;
+  title: string;
+  webViewLink: string;
+}
+
+export interface DocUpdateResult {
+  documentId: string;
+  revisionId?: string;
+  mode: "append" | "replace";
+}
+
+// Sheets tool outputs
+export interface SheetTab {
+  sheetId: number;
+  title: string;
+  index?: number;
+  rowCount?: number;
+  columnCount?: number;
+}
+
+export interface SheetsListResult {
+  spreadsheetId: string;
+  title: string;
+  sheets: SheetTab[];
+  webViewLink?: string;
+}
+
+export interface SheetsRangeData {
+  spreadsheetId: string;
+  range: string;
+  majorDimension: "ROWS" | "COLUMNS";
+  values: string[][];
+}
+
+export interface SheetsWriteResult {
+  spreadsheetId: string;
+  updatedRange?: string;
+  updatedRows?: number;
+  updatedColumns?: number;
+  updatedCells?: number;
+}
+
+export interface SheetsCreateResult {
+  spreadsheetId: string;
+  title: string;
+  webViewLink: string;
+}
+
+// Slides tool outputs
+export interface SlideSummary {
+  objectId: string;
+  /** Plain text concatenated from all text elements on the slide */
+  text: string;
+}
+
+export interface SlidesPresentation {
+  presentationId: string;
+  title: string;
+  slideCount: number;
+  slides: SlideSummary[];
+  revisionId?: string;
+}
+
+export interface SlidesCreateResult {
+  presentationId: string;
+  title: string;
+  webViewLink: string;
+}
+
+export interface SlidesAddSlideResult {
+  presentationId: string;
+  slideObjectId: string;
+  index: number;
 }
 
 // Environment contract — set by plugin via .mcp.json
