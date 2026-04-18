@@ -1,5 +1,55 @@
 # Changelog
 
+## v2.1.0 — 2026-04-18 — Library UX: categories + ratings + prereqs
+
+Skills repo graduated from flat registry to curated library. Plugin now parses library metadata (stars, difficulty, scope, requires) and evaluates prereqs before skill install.
+
+### Added
+- **`SkillDef` interface extended** — optional fields: `stars`, `difficulty`, `value`, `scope`, `requires[]`, `category`. Backwards-compatible (old registries without these fields still work).
+- **`evaluateSetupFlag(flag, app)`** — runtime check for setup prereqs: `vault-structure`, `gsuite-connected`, `whatsapp-macos`, `git-initialized`, `python3`.
+- **`checkSkillPrereqs(skill, installed, app)`** — returns array of missing prereqs (skill IDs or setup flags).
+- **`CATEGORY_META`** — 5 categories with icons: Capture 📥, Analyze 🔍, Create ✏️, Maintain 🧹, Automate 🤖.
+- **Hardcoded SKILLS array enriched** — all 13 entries now have full library metadata (stars, difficulty, value, scope, requires, category). Fallback for offline / registry-unreachable scenarios.
+
+### Skills repo changes (separate repo — `klemensgc/modular-context-skills`)
+- Registry schema v2: 23 skills (added `skills-audit`), all with full metadata
+- 5 categories replace old 6 — `analyze / capture / create / maintain / automate`
+- Fixed `reweave` skill (missing folder caught by post-v2.0 audit)
+- New `CONTRIBUTING.md` — standardisation checklist for contributors
+- New `.github/workflows/validate-skills.yml` — CI validator (registry schema + folder presence + field validity)
+- README full rewrite: bookshelf ASCII, legend, 5 category tables, Czarek onboarding, install/uninstall guide
+
+### New skills
+- **`skills-audit`** (community) — scan your installed skills, detect eligibility gaps, motivate contribution. 4-bucket report: Installed / Eligible / Prereq-blocked / Aspirational.
+- **`skill-validator`** (admin-only, lives in maintainer's vault, NOT community) — quality gate for PR review + pre-publish check. 5-layer validation: frontmatter, sections, MC methodology, rating sanity, security anti-patterns.
+
+### Coming in v2.1.1 (follow-up)
+- Full sidebar UI integration — group rendering, star icons, difficulty badges, scope icons. Current v2.1.0 ships data model + helpers; UI polish is next patch.
+- Install-flow prereq gating — button disabled + tooltip when requires[] unmet. Helpers in place; UI wiring pending.
+- Onboarding modal 5-category preview + skills-audit promotion.
+
+### Tied MCP server
+- `mcp-google-workspace` parallel releases **v1.2.0** (Drive ×4 + Docs ×3) and **v1.3.0** (Sheets ×5 + Slides ×3). Total **25 tools** (up from 10 at v2.0.0) across Gmail, Calendar, Drive, Docs, Sheets, Slides.
+- `GOOGLE_WORKSPACE_SCOPES` expanded 5 → 10 in `@mc/shared`: added `drive.file`, `drive.metadata.readonly`, `documents`, `spreadsheets`, `presentations`.
+- `ConnectGoogleModal` scope disclosure copy updated to describe all 10 scopes (replaces stale v1.x copy referencing `gmail.readonly` / `calendar.events`).
+- `installer.ts` `REQUIRED_SERVER_VERSION` bumped 1.1.0 → 1.3.0 — plugin auto-replaces `~/.modular-context/mcp-google/dist/index.js` on first load.
+- gsuite-analysis skill label updated: "Gmail + Calendar" → "Gmail + G-Suite" (covers Docs/Drive/Sheets/Slides)
+
+### Fixed
+- **MCP sidecar desync (zombie account entries)** — plugin-side account index (`vault/.modular-context/accounts-index.json`) and server-side sidecar (`~/.modular-context/mcp-google/accounts-index.json`) could drift when accounts were added/removed outside normal modal flow. Resulted in `TOKEN_MISSING` errors for primary when actual credentials lived under a different account. Fix: new `reconcileMcpSidecar()` helper auto-runs after every `syncMcpOnConnect`, pruning orphans and aligning primary selection. Available as manual command `Google Workspace: Repair MCP sidecar (reconcile)` in command palette for existing broken states.
+- **Primary account auto-fallback on disconnect** — verified and hardened. When primary is removed, next account in list is promoted (already in plugin-side `MultiAccountSafeStorage.removeAccount`, now mirrored to server-side via reconcile).
+
+### Migration (for users upgrading from v2.0.0)
+- **Re-authentication required to enable Drive/Docs/Sheets/Slides tools.** Run `Google Workspace: Status` after upgrade — accounts with old scopes show `needs reconnect (missing 5 scopes)`. Click Connect in modal; consent screen now requests all 10 scopes.
+- **Enable Google Cloud APIs.** Users must enable Drive API, Docs API, Sheets API, and Slides API in their OAuth project (same project used for Gmail/Calendar v1.x). Tool calls return `PERMISSION_DENIED` with direct console links until enabled.
+- **Existing sidecar desync self-heals on first Connect action post-upgrade** via `reconcileMcpSidecar`. If status command shows apollo@ / stale accounts, run `Google Workspace: Repair MCP sidecar` manually.
+
+### Breaking changes
+- **None** at plugin level. SkillDef extensions are optional.
+- **Registry schema** is v2 (new version `2.0.0`). Old plugin versions will still parse it (they ignore unknown fields), but won't display new metadata.
+
+---
+
 ## v2.0.0 — 2026-04-18 — Modular Context | Karpathy LLM Knowledge Base + Gmail & G-Cal
 
 First stable release. Graduates v1.5 / v1.6 / v1.7 beta milestones into one production-ready bundle. New positioning: your Obsidian vault as LLM-native knowledge base + multi-account G-Suite MCP server for Claude Code.

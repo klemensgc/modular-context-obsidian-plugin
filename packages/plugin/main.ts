@@ -30,7 +30,7 @@ import {
 import { ConnectGoogleModal } from "./src/google/ui/connect-google-modal";
 import { createStorageMethod } from "./src/google/tokens/storage";
 import { startRefreshTimer, type RefreshTimerHandle } from "./src/google/tokens/refresh";
-import type { TokenStorageMethod, OAuthConfig, StoredTokens } from "@mc/shared";
+import type { TokenStorageMethod, OAuthConfig, StoredTokens, AccountIndex } from "@mc/shared";
 import { GOOGLE_WORKSPACE_SCOPES } from "@mc/shared";
 
 // Esbuild injects these from packages/plugin/.env.local (empty strings if file absent)
@@ -607,7 +607,13 @@ class TerminalSession {
     this._activityCallback = cb;
   }
 
-  constructor(parent: HTMLElement, id: number, cwd: string, app: App) {
+  constructor(
+    parent: HTMLElement,
+    id: number,
+    cwd: string,
+    app: App,
+    opts: { env?: Record<string, string> } = {},
+  ) {
     this.id = id;
     this.name = `zsh ${id}`;
     this.app = app;
@@ -642,6 +648,7 @@ class TerminalSession {
       cwd,
       cols: 80,
       rows: 24,
+      env: opts.env,
     });
     this.process = ptyProcess;
 
@@ -1123,6 +1130,8 @@ class TerminalView extends ItemView {
   tracker: AgentTracker | null = null;
   autoMode = false;
   aiProvider: "claude" | "codex" = "claude";
+  /** CLAUDE_CODE_NO_FLICKER — enables alt screen buffer rendering to fix scroll-jump / flicker bugs. */
+  antiFlicker = false;
   /** Session IDs already claimed by open terminals (prevents round-robin collisions). */
   private usedSessionIds = new Set<string>();
   private sidebarDirty = true;
@@ -1304,6 +1313,14 @@ class TerminalView extends ItemView {
       setIcon(infoBtn, "info");
       infoBtn.title = "About this plugin";
       infoBtn.addEventListener("click", () => new OnboardingModal(this.app, this).open());
+
+      const flickerBtn = toolbar.createDiv({ cls: "mc-sidebar-toolbar-btn mc-sidebar-flicker-btn" });
+      flickerBtn.classList.toggle("is-active", this.antiFlicker);
+      setIcon(flickerBtn, this.antiFlicker ? "monitor-check" : "monitor");
+      flickerBtn.title = this.antiFlicker
+        ? "Anti-flicker ON — CLAUDE_CODE_NO_FLICKER=1 (click to disable)"
+        : "Anti-flicker OFF — click to enable fullscreen rendering (fixes scroll jumps)";
+      flickerBtn.addEventListener("click", () => this.toggleAntiFlicker());
 
       const fsBtn = toolbar.createDiv({ cls: "mc-sidebar-toolbar-btn mc-sidebar-fs-btn" });
       this.updateFsIcon();
@@ -1500,6 +1517,7 @@ class TerminalView extends ItemView {
     pluginData.skillConfig = (this as any).skillConfig ?? {};
     pluginData.autoMode = this.autoMode ?? false;
     pluginData.aiProvider = this.aiProvider ?? "claude";
+    pluginData.antiFlicker = this.antiFlicker ?? false;
     pluginData.layout = this.displayMode.layout;
     await src.saveData(pluginData);
   }
@@ -1513,6 +1531,7 @@ class TerminalView extends ItemView {
     (this as any).skillConfig = pluginData.skillConfig ?? {};
     this.autoMode = pluginData.autoMode ?? false;
     this.aiProvider = pluginData.aiProvider ?? "claude";
+    this.antiFlicker = pluginData.antiFlicker ?? false;
     this.displayMode.layout = pluginData.layout ?? "single";
     this.inlineLayout = this.displayMode.layout; // legacy mirror
     (this as any).maxSessions = pluginData.maxSessions ?? 12;
@@ -1880,7 +1899,10 @@ class TerminalView extends ItemView {
           rGlyphEl.innerHTML = g?.svg ?? SESSION_GLYPHS[0].svg;
         }
       }
-      cardHeader.createSpan({ cls: "mc-sidebar-card-name", text: t.skillName });
+      cardHeader.createSpan({
+        cls: "mc-sidebar-card-name",
+        text: session?.name ?? t.skillName,
+      });
       if (this.sessions.length > 1 && session) {
         const closeBtn = cardHeader.createDiv({ cls: "mc-sidebar-card-close" });
         setIcon(closeBtn, "x");
@@ -2135,6 +2157,37 @@ class TerminalView extends ItemView {
     (session as any)._toolbarNameEl = nameEl;
   }
 
+  /** Build env overrides for new PTY sessions based on current view settings. */
+  private getSessionEnv(): Record<string, string> {
+    const env: Record<string, string> = {};
+    if (this.antiFlicker) env.CLAUDE_CODE_NO_FLICKER = "1";
+    return env;
+  }
+
+  /** Toggle anti-flicker mode. New sessions inherit env; running shells receive
+   *  an inline export/unset so the next `claude` invocation picks up the change.
+   *  (Running Claude TUIs won't re-read env — user must restart `claude` to apply.) */
+  private toggleAntiFlicker() {
+    this.antiFlicker = !this.antiFlicker;
+    const line = this.antiFlicker
+      ? `export CLAUDE_CODE_NO_FLICKER=1\r`
+      : `unset CLAUDE_CODE_NO_FLICKER\r`;
+    for (const s of this.sessions) {
+      try {
+        s.process?.stdin?.write(line);
+      } catch {
+        // ignore — closed process
+      }
+    }
+    new Notice(
+      this.antiFlicker
+        ? "Anti-flicker ON. Restart `claude` in active shells to apply."
+        : "Anti-flicker OFF. Restart `claude` in active shells to apply.",
+    );
+    void this.saveCustomSkills();
+    this.buildSidebar();
+  }
+
   createSession(name?: string): TerminalSession | null {
     try {
       const max = (this as any).maxSessions ?? 12;
@@ -2146,7 +2199,9 @@ class TerminalView extends ItemView {
       const vaultPath = (this.app.vault.adapter as any).basePath as string;
       // Spawn into parking — renderLayout() will move it into the right pane.
       // No more direct parent = sessionsEl + then immediate reparent by switchTo.
-      const session = new TerminalSession(this.parkingEl, id, vaultPath, this.app);
+      const session = new TerminalSession(this.parkingEl, id, vaultPath, this.app, {
+        env: this.getSessionEnv(),
+      });
       if (name) {
         session.name = name;
         (session as any)._autoNameLocked = true;
@@ -2231,7 +2286,9 @@ class TerminalView extends ItemView {
       for (const legacy of this._pendingLegacySessions!) {
         if (legacy.id >= this.nextId) this.nextId = legacy.id + 1;
         const vaultPath = (this.app.vault.adapter as any).basePath as string;
-        const session = new TerminalSession(this.parkingEl, legacy.id, vaultPath, this.app);
+        const session = new TerminalSession(this.parkingEl, legacy.id, vaultPath, this.app, {
+          env: this.getSessionEnv(),
+        });
         session.name = legacy.name;
         session.glyph = legacy.glyph;
         (session as any)._autoNameLocked = true;
@@ -2304,7 +2361,9 @@ class TerminalView extends ItemView {
     try {
       if (snap.id >= this.nextId) this.nextId = snap.id + 1;
       const vaultPath = (this.app.vault.adapter as any).basePath as string;
-      const session = new TerminalSession(this.parkingEl, snap.id, vaultPath, this.app);
+      const session = new TerminalSession(this.parkingEl, snap.id, vaultPath, this.app, {
+        env: this.getSessionEnv(),
+      });
       session.name = snap.name || `zsh ${snap.id}`;
       session.glyph = snap.glyph;
       session.skillName = snap.skillName ?? null;
@@ -2960,8 +3019,21 @@ class RestorePickerModal extends Modal {
 
 // --- OnboardingModal ---
 
+const GOOGLE_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="18" height="18" aria-hidden="true"><path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"/><path fill="#FF3D00" d="M6.306 14.691l6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 16.318 4 9.656 8.337 6.306 14.691z"/><path fill="#4CAF50" d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238A11.91 11.91 0 0 1 24 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z"/><path fill="#1976D2" d="M43.611 20.083H42V20H24v8h11.303a12.04 12.04 0 0 1-4.087 5.571l.003-.002 6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z"/></svg>`;
+
+type OnboardingTabId = "overview" | "accounts" | "skills";
+
+const ONBOARDING_TABS: Array<{ id: OnboardingTabId; label: string; icon: string }> = [
+  { id: "overview", label: "Overview", icon: "book-open" },
+  { id: "accounts", label: "Accounts", icon: "user-circle-2" },
+  { id: "skills", label: "Skills", icon: "sparkles" },
+];
+
 class OnboardingModal extends Modal {
   private view: TerminalView;
+  private activeTab: OnboardingTabId = "overview";
+  private panels: Map<OnboardingTabId, HTMLElement> = new Map();
+  private tabButtons: Map<OnboardingTabId, HTMLElement> = new Map();
 
   constructor(app: App, view: TerminalView) {
     super(app);
@@ -2969,11 +3041,24 @@ class OnboardingModal extends Modal {
   }
 
   onOpen() {
-    const { contentEl } = this;
+    const { contentEl, modalEl } = this;
     contentEl.addClass("mc-onboarding-modal");
+    modalEl.addClass("mc-onboarding-modal-container");
 
-    // Header with ROS signet
-    const header = contentEl.createDiv({ cls: "mc-onboarding-header" });
+    this.renderHeader(contentEl);
+
+    const body = contentEl.createDiv({ cls: "mc-onboarding-body-wrap" });
+    const nav = body.createDiv({ cls: "mc-onboarding-tabs" });
+    const content = body.createDiv({ cls: "mc-onboarding-content" });
+
+    this.renderTabNav(nav);
+    this.renderProviderDock(nav);
+    this.renderAllPanels(content);
+    this.switchTab(this.activeTab);
+  }
+
+  private renderHeader(container: HTMLElement): void {
+    const header = container.createDiv({ cls: "mc-onboarding-header" });
     const headerIcon = header.createDiv({ cls: "mc-onboarding-header-icon" });
     setIcon(headerIcon, "ros-signet");
     const headerText = header.createDiv();
@@ -2982,18 +3067,65 @@ class OnboardingModal extends Modal {
       text: "Your AI-native second brain — structured knowledge base in Obsidian, powered by Claude Code.",
       cls: "mc-onboarding-subtitle",
     });
+  }
 
-    // Methodology
-    contentEl.createEl("h4", { text: "How it works" });
+  private renderTabNav(container: HTMLElement): void {
+    for (const tab of ONBOARDING_TABS) {
+      const btn = container.createDiv({ cls: "mc-onboarding-tab" });
+      const iconWrap = btn.createSpan({ cls: "mc-onboarding-tab-icon" });
+      setIcon(iconWrap, tab.icon);
+      btn.createSpan({ cls: "mc-onboarding-tab-label", text: tab.label });
+      btn.addEventListener("click", () => this.switchTab(tab.id));
+      this.tabButtons.set(tab.id, btn);
+    }
+  }
 
+  private renderAllPanels(container: HTMLElement): void {
+    for (const tab of ONBOARDING_TABS) {
+      const panel = container.createDiv({ cls: "mc-onboarding-panel" });
+      this.panels.set(tab.id, panel);
+      switch (tab.id) {
+        case "overview":
+          this.renderOverviewPanel(panel);
+          break;
+        case "accounts":
+          void this.renderAccountsPanel(panel);
+          break;
+        case "skills":
+          this.renderSkillsPanel(panel);
+          break;
+      }
+    }
+  }
+
+  private switchTab(tabId: OnboardingTabId): void {
+    this.activeTab = tabId;
+    for (const [id, btn] of this.tabButtons) {
+      btn.classList.toggle("is-active", id === tabId);
+    }
+    for (const [id, panel] of this.panels) {
+      panel.classList.toggle("is-active", id === tabId);
+    }
+  }
+
+  // ─────────────────────────── Overview tab ───────────────────────────
+
+  private renderOverviewPanel(container: HTMLElement): void {
+    this.renderHowItWorks(container);
+    this.renderBuildVault(container);
+    this.renderDashboardGuide(container);
+    this.renderCTA(container);
+  }
+
+  private renderHowItWorks(container: HTMLElement): void {
+    container.createEl("h4", { text: "How it works" });
     const steps: [string, string][] = [
       ["Capture", "Record conversations, meetings, ideas — drop raw transcripts into the vault"],
       ["Process", "AI agents categorize, extract insights, and update knowledge modules automatically"],
       ["Connect", "Wiki-links and cross-references build a living knowledge graph across all your projects"],
       ["Act", "Skills turn vault knowledge into deliverables — briefs, audits, strategic pulses, syncs"],
     ];
-
-    const stepsEl = contentEl.createDiv({ cls: "mc-onboarding-steps" });
+    const stepsEl = container.createDiv({ cls: "mc-onboarding-steps" });
     steps.forEach(([title, desc], i) => {
       const step = stepsEl.createDiv({ cls: "mc-onboarding-step" });
       step.createDiv({ cls: "mc-onboarding-step-num", text: `${i + 1}` });
@@ -3001,103 +3133,10 @@ class OnboardingModal extends Modal {
       stepText.createEl("strong", { text: title });
       stepText.createSpan({ text: ` — ${desc}` });
     });
+  }
 
-    // Settings: AI Provider toggle
-    contentEl.createEl("h4", { text: "Settings" });
-
-    const providerToggle = contentEl.createDiv({ cls: "mc-provider-toggle" });
-    providerToggle.createDiv({ cls: "mc-provider-toggle-label", text: "AI Provider" });
-    const segment = providerToggle.createDiv({ cls: "mc-provider-segment" });
-
-    const claudeBtn = segment.createEl("button", { cls: "mc-provider-segment-btn", text: "Claude Code" });
-    const codexBtn = segment.createEl("button", { cls: "mc-provider-segment-btn", text: "Codex" });
-
-    const updateActive = () => {
-      claudeBtn.classList.toggle("is-active", this.view.aiProvider === "claude");
-      codexBtn.classList.toggle("is-active", this.view.aiProvider === "codex");
-    };
-    updateActive();
-
-    claudeBtn.addEventListener("click", () => {
-      this.view.aiProvider = "claude";
-      updateActive();
-      this.view.saveCustomSkills();
-    });
-    codexBtn.addEventListener("click", () => {
-      this.view.aiProvider = "codex";
-      updateActive();
-      this.view.saveCustomSkills();
-    });
-
-    // --- Connect accounts (Google Workspace) ---
-    contentEl.createEl("h4", { text: "Connect accounts" });
-
-    const gwSection = contentEl.createDiv({ cls: "mc-onboarding-connect-accounts" });
-    const gwRow = gwSection.createDiv({ cls: "mc-onboarding-connect-accounts-row" });
-    const gwLabel = gwRow.createDiv();
-    gwLabel.createEl("strong", { text: "Google Workspace" });
-    gwLabel.createEl("div", {
-      text: "Gmail + Calendar as tools for Claude Code",
-      cls: "mc-onboarding-body",
-    });
-
-    const gwPill = gwRow.createSpan({
-      cls: "mc-connection-pill is-disconnected",
-      text: "Disconnected",
-    });
-
-    const gwPlugin = (this.view as any).plugin as TerminalPlugin | undefined;
-    if (gwPlugin) {
-      // Update pill based on current connection state
-      void gwPlugin.getGoogleStorage().loadTokens().then((tokens: StoredTokens | null) => {
-        if (tokens) {
-          gwPill.textContent = "Connected";
-          gwPill.classList.remove("is-disconnected");
-          gwPill.classList.add("is-connected");
-        }
-      }).catch(() => {
-        // Error loading — leave as disconnected
-      });
-
-      gwRow.addEventListener("click", () => {
-        new ConnectGoogleModal(this.app, {
-          storage: gwPlugin.getGoogleStorage(),
-          quickConnect: {
-            clientId: process.env.GOOGLE_OAUTH_CLIENT_ID || "",
-            clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET || "",
-          },
-          onStateChange: (state) => {
-            if (state.kind === "connected") {
-              gwPill.textContent = "Connected";
-              gwPill.classList.remove("is-disconnected", "is-error");
-              gwPill.classList.add("is-connected");
-              void gwPlugin.syncMcpOnConnect(state.tokens.accountEmail);
-            } else if (state.kind === "error") {
-              gwPill.textContent = "Error";
-              gwPill.classList.remove("is-disconnected", "is-connected");
-              gwPill.classList.add("is-error");
-            } else if (state.kind === "disconnected") {
-              gwPill.textContent = "Disconnected";
-              gwPill.classList.remove("is-connected", "is-error");
-              gwPill.classList.add("is-disconnected");
-              // Onboarding modal disconnect = disconnect all accounts
-              void gwPlugin.syncMcpOnDisconnect();
-            }
-          },
-        }).open();
-      });
-    }
-
-    // Dashboard guide
-    contentEl.createEl("h4", { text: "Dashboard" });
-    contentEl.createEl("p", {
-      text: "The sidebar is your command center. Primary skills at the top are your daily drivers. Click any skill to launch a Claude Code session that executes it. Working shows running agents. To Review surfaces completed work awaiting your approval.",
-      cls: "mc-onboarding-body",
-    });
-
-    // Build your own vault
-    contentEl.createEl("h4", { text: "Build your own vault" });
-
+  private renderBuildVault(container: HTMLElement): void {
+    container.createEl("h4", { text: "Build your own vault" });
     const vaultSteps: string[] = [
       "Start with CLAUDE.md — it teaches Claude how to navigate your vault",
       "Create project folders with index files as entry points",
@@ -3105,43 +3144,245 @@ class OnboardingModal extends Modal {
       "Define skills in .claude/skills/ to automate recurring workflows",
       "Use frontmatter (status, updated, depends-on) to keep everything alive",
     ];
-
-    const vaultList = contentEl.createEl("ol", { cls: "mc-onboarding-vault-list" });
+    const vaultList = container.createEl("ol", { cls: "mc-onboarding-vault-list" });
     for (const step of vaultSteps) {
       vaultList.createEl("li", { text: step });
     }
+  }
 
-    // Skill Library picker
-    contentEl.createEl("h4", { text: "Install skills" });
-    contentEl.createEl("p", {
-      text: "Skills are AI workflows you can launch from the sidebar. Select which ones to install:",
+  private renderDashboardGuide(container: HTMLElement): void {
+    container.createEl("h4", { text: "Dashboard" });
+    container.createEl("p", {
+      text: "The sidebar is your command center. Primary skills at the top are your daily drivers. Click any skill to launch a Claude Code session that executes it. Working shows running agents. To Review surfaces completed work awaiting your approval.",
+      cls: "mc-onboarding-body",
+    });
+  }
+
+  private renderCTA(container: HTMLElement): void {
+    const cta = container.createDiv({ cls: "mc-onboarding-cta" });
+    const ctaBtn = cta.createEl("button", {
+      cls: "mc-onboarding-cta-btn",
+      text: "Start Here →",
+    });
+    cta.createEl("p", {
+      text: "An AI agent will scan your vault and guide you through setting up the modular-context methodology.",
+      cls: "mc-onboarding-cta-desc",
+    });
+    ctaBtn.addEventListener("click", () => {
+      this.close();
+      this.launchOnboardingAgent();
+    });
+  }
+
+  // ─────────────────────────── Accounts tab ───────────────────────────
+
+  private async renderAccountsPanel(container: HTMLElement): Promise<void> {
+    container.createEl("h4", { text: "Connected accounts" });
+    container.createEl("p", {
+      text: "Link Google Workspace so Claude Code can read Gmail, create drafts, and manage your calendar — all from inside your vault.",
       cls: "mc-onboarding-body",
     });
 
-    const pickerEl = contentEl.createDiv({ cls: "mc-onboarding-skill-picker" });
-    const selectedSkills = new Set<string>();
+    const cardHost = container.createDiv({ cls: "mc-account-card-host" });
+    await this.refreshAccountCard(cardHost);
+  }
 
-    // "Full Library" master checkbox
-    const masterRow = pickerEl.createDiv({ cls: "mc-onboarding-skill-row is-master" });
+  private async refreshAccountCard(host: HTMLElement): Promise<void> {
+    host.empty();
+    const gwPlugin = (this.view as any).plugin as TerminalPlugin | undefined;
+    if (!gwPlugin) {
+      host.createEl("p", {
+        text: "Google Workspace integration unavailable in this build.",
+        cls: "mc-onboarding-body",
+      });
+      return;
+    }
+
+    const account = await this.loadPrimaryAccount(gwPlugin);
+    if (account) {
+      this.renderConnectedAccountCard(host, gwPlugin, account);
+    } else {
+      this.renderDisconnectedAccountCard(host, gwPlugin);
+    }
+  }
+
+  private async loadPrimaryAccount(
+    gwPlugin: TerminalPlugin,
+  ): Promise<AccountIndex | null> {
+    const storage = gwPlugin.getGoogleStorage() as any;
+    const multi = typeof storage.getMulti === "function" ? storage.getMulti() : null;
+    if (multi) {
+      try {
+        const accounts = (await multi.listAccounts()) as AccountIndex[];
+        if (accounts.length === 0) return null;
+        return accounts.find((a) => a.isPrimary) ?? accounts[0];
+      } catch {
+        return null;
+      }
+    }
+    // Legacy fallback — synthesize minimal AccountIndex from StoredTokens
+    try {
+      const tokens = await storage.loadTokens();
+      if (!tokens) return null;
+      return {
+        id: tokens.accountEmail.toLowerCase(),
+        email: tokens.accountEmail,
+        filename: "",
+        scope: tokens.scope,
+        connectedAt: new Date().toISOString(),
+        isPrimary: true,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private renderConnectedAccountCard(
+    host: HTMLElement,
+    gwPlugin: TerminalPlugin,
+    account: AccountIndex,
+  ): void {
+    const card = host.createDiv({ cls: "mc-account-card is-connected" });
+
+    const avatar = card.createDiv({ cls: "mc-account-avatar" });
+    avatar.innerHTML = GOOGLE_ICON_SVG;
+
+    const body = card.createDiv({ cls: "mc-account-body" });
+    const titleRow = body.createDiv({ cls: "mc-account-title-row" });
+    titleRow.createEl("strong", { text: "Google Workspace" });
+
+    body.createDiv({ cls: "mc-account-email", text: account.email });
+
+    const status = body.createDiv({ cls: "mc-account-status" });
+    status.createSpan({ cls: "mc-account-status-dot" });
+    const statusText = status.createSpan({ cls: "mc-account-status-text" });
+    const when = account.lastRefreshed ?? account.connectedAt;
+    const whenLabel = account.lastRefreshed ? "Last sync" : "Connected";
+    statusText.setText(`Connected · ${whenLabel} ${this.formatRelativeTime(when)}`);
+
+    const actions = card.createDiv({ cls: "mc-account-actions" });
+    const manageBtn = actions.createEl("button", {
+      cls: "mc-account-manage-btn",
+      text: "Manage",
+    });
+    manageBtn.addEventListener("click", () => {
+      this.openConnectModal(gwPlugin, host);
+    });
+  }
+
+  private renderDisconnectedAccountCard(
+    host: HTMLElement,
+    gwPlugin: TerminalPlugin,
+  ): void {
+    const card = host.createDiv({ cls: "mc-account-card is-disconnected" });
+
+    const body = card.createDiv({ cls: "mc-account-card-header" });
+    const avatar = body.createDiv({ cls: "mc-account-avatar" });
+    avatar.innerHTML = GOOGLE_ICON_SVG;
+    const text = body.createDiv({ cls: "mc-account-body" });
+    text.createEl("strong", { text: "Google Workspace" });
+    text.createEl("div", {
+      text: "Gmail + Calendar as tools for Claude Code",
+      cls: "mc-account-email",
+    });
+
+    const connectBtn = card.createEl("button", {
+      cls: "mc-oauth-button-google",
+      text: "Connect with Google",
+    });
+    const iconSpan = document.createElement("span");
+    iconSpan.className = "mc-oauth-button-google-icon";
+    iconSpan.innerHTML = GOOGLE_ICON_SVG;
+    connectBtn.prepend(iconSpan);
+    connectBtn.addEventListener("click", () => {
+      this.openConnectModal(gwPlugin, host);
+    });
+  }
+
+  private openConnectModal(
+    gwPlugin: TerminalPlugin,
+    host: HTMLElement,
+  ): void {
+    new ConnectGoogleModal(this.app, {
+      storage: gwPlugin.getGoogleStorage(),
+      quickConnect: {
+        clientId: process.env.GOOGLE_OAUTH_CLIENT_ID || "",
+        clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET || "",
+      },
+      onStateChange: (state) => {
+        if (state.kind === "connected") {
+          void gwPlugin.syncMcpOnConnect(state.tokens.accountEmail);
+          void this.refreshAccountCard(host);
+        } else if (state.kind === "disconnected") {
+          void gwPlugin.syncMcpOnDisconnect();
+          void this.refreshAccountCard(host);
+        }
+      },
+    }).open();
+  }
+
+  private formatRelativeTime(iso: string): string {
+    const then = new Date(iso).getTime();
+    if (Number.isNaN(then)) return "recently";
+    const diff = Date.now() - then;
+    if (diff < 0) return "just now";
+    const sec = Math.floor(diff / 1000);
+    if (sec < 30) return "just now";
+    if (sec < 60) return `${sec}s ago`;
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `${min} min ago`;
+    const hr = Math.floor(min / 60);
+    if (hr < 24) return `${hr}h ago`;
+    const day = Math.floor(hr / 24);
+    if (day < 30) return `${day}d ago`;
+    const month = Math.floor(day / 30);
+    if (month < 12) return `${month}mo ago`;
+    const year = Math.floor(day / 365);
+    return `${year}y ago`;
+  }
+
+  // ─────────────────────────── Skills tab ───────────────────────────
+
+  private renderSkillsPanel(container: HTMLElement): void {
+    container.createEl("h4", { text: "Install skills" });
+    container.createEl("p", {
+      text: "Skills are AI workflows launched from the sidebar. Select which to install:",
+      cls: "mc-onboarding-body",
+    });
+
+    const selectedSkills = new Set<string>();
+    const plugin = (this.view as any).plugin as TerminalPlugin | undefined;
+
+    // Top control bar — master checkbox + install button (pinned, not scrolling)
+    const controlBar = container.createDiv({ cls: "mc-onboarding-skill-controls" });
+    const masterRow = controlBar.createDiv({ cls: "mc-onboarding-skill-row is-master" });
     const masterCb = masterRow.createEl("input", { type: "checkbox" }) as HTMLInputElement;
     masterCb.id = "mc-skill-master";
     const masterLabel = masterRow.createEl("label");
     masterLabel.htmlFor = "mc-skill-master";
-    masterLabel.createEl("strong", { text: "Full Modular Context Library" });
-    masterLabel.createSpan({ text: " — install all core skills" });
+    masterLabel.createEl("strong", { text: "Full Library" });
+    masterLabel.createSpan({ text: " — install all" });
 
+    const installBtn = controlBar.createEl("button", {
+      cls: "mc-onboarding-install-btn",
+      text: "Install Selected",
+    });
+    const installStatus = controlBar.createSpan({ cls: "mc-onboarding-install-status" });
+
+    // Scrollable skills list
+    const pickerEl = container.createDiv({ cls: "mc-onboarding-skill-picker" });
     const skillCheckboxes: HTMLInputElement[] = [];
 
-    // Load registry and build checkboxes
-    const plugin = (this.view as any).plugin as TerminalPlugin | undefined;
     const buildPicker = async () => {
       const registry = await plugin?.skillRegistry?.fetchRegistry();
       if (!registry) {
-        pickerEl.createEl("p", { text: "Could not load skill library. Check your internet connection.", cls: "mc-onboarding-error" });
+        pickerEl.createEl("p", {
+          text: "Could not load skill library. Check your internet connection.",
+          cls: "mc-onboarding-error",
+        });
         return;
       }
 
-      // Group by category
       const categories = new Map<string, RegistrySkill[]>();
       for (const skill of registry.skills) {
         const cat = skill.category;
@@ -3167,7 +3408,7 @@ class OnboardingModal extends Modal {
           label.htmlFor = cb.id;
           label.createEl("strong", { text: skill.label });
           label.createSpan({ text: ` — ${skill.description.split(".")[0]}` });
-          const sizeSpan = label.createSpan({ cls: "mc-onboarding-skill-size", text: skill.size });
+          label.createSpan({ cls: "mc-onboarding-skill-size", text: skill.size });
 
           cb.addEventListener("change", () => {
             if (cb.checked) selectedSkills.add(skill.id);
@@ -3179,7 +3420,7 @@ class OnboardingModal extends Modal {
         }
       }
     };
-    buildPicker();
+    void buildPicker();
 
     masterCb.addEventListener("change", () => {
       for (const cb of skillCheckboxes) {
@@ -3192,14 +3433,6 @@ class OnboardingModal extends Modal {
       }
     });
 
-    // Install button
-    const installRow = pickerEl.createDiv({ cls: "mc-onboarding-install-row" });
-    const installBtn = installRow.createEl("button", {
-      cls: "mc-onboarding-install-btn",
-      text: "Install Selected Skills",
-    });
-    const installStatus = installRow.createSpan({ cls: "mc-onboarding-install-status" });
-
     installBtn.addEventListener("click", async () => {
       if (selectedSkills.size === 0) {
         new Notice("No skills selected.");
@@ -3211,29 +3444,44 @@ class OnboardingModal extends Modal {
       const count = await plugin?.skillRegistry?.installMultiple(ids, (done, total) => {
         installStatus.textContent = `${done}/${total}`;
       }) ?? 0;
-      installBtn.textContent = `Installed ${count} skills ✓`;
+      installBtn.textContent = `Installed ${count} ✓`;
       installStatus.textContent = "";
       new Notice(`Installed ${count} skills.`);
-      // Rebuild sidebar to show new skills
       this.view.buildSidebar();
     });
+  }
 
-    // Divider
-    contentEl.createEl("hr", { cls: "mc-onboarding-divider" });
+  // ─────────────────────────── Provider dock (sidebar footer) ───────────────────────────
 
-    // CTA: Start Here onboarding session
-    const cta = contentEl.createDiv({ cls: "mc-onboarding-cta" });
-    const ctaBtn = cta.createEl("button", {
-      cls: "mc-onboarding-cta-btn",
-      text: "Start Here →",
+  private renderProviderDock(container: HTMLElement): void {
+    const dock = container.createDiv({ cls: "mc-onboarding-dock" });
+    dock.createDiv({ cls: "mc-onboarding-dock-label", text: "AI PROVIDER" });
+
+    const segment = dock.createDiv({ cls: "mc-provider-segment is-compact" });
+    const claudeBtn = segment.createEl("button", {
+      cls: "mc-provider-segment-btn",
+      text: "Claude",
     });
-    cta.createEl("p", {
-      text: "An AI agent will scan your vault and guide you through setting up the modular-context methodology.",
-      cls: "mc-onboarding-cta-desc",
+    const codexBtn = segment.createEl("button", {
+      cls: "mc-provider-segment-btn",
+      text: "Codex",
     });
-    ctaBtn.addEventListener("click", () => {
-      this.close();
-      this.launchOnboardingAgent();
+
+    const updateActive = () => {
+      claudeBtn.classList.toggle("is-active", this.view.aiProvider === "claude");
+      codexBtn.classList.toggle("is-active", this.view.aiProvider === "codex");
+    };
+    updateActive();
+
+    claudeBtn.addEventListener("click", () => {
+      this.view.aiProvider = "claude";
+      updateActive();
+      this.view.saveCustomSkills();
+    });
+    codexBtn.addEventListener("click", () => {
+      this.view.aiProvider = "codex";
+      updateActive();
+      this.view.saveCustomSkills();
     });
   }
 
@@ -3562,24 +3810,80 @@ interface SkillDef {
   label: string;
   description: string;
   primary?: boolean;
+  // v2.1 library extensions (all optional — backwards compat w registries without these fields)
+  stars?: 1 | 2 | 3 | 4 | 5;
+  difficulty?: "learner" | "operator" | "expert";
+  value?: "low" | "medium" | "high";
+  scope?: "universal" | "native-mc";
+  requires?: string[];
+  category?: "analyze" | "capture" | "create" | "maintain" | "automate";
 }
+
+// Category → (label, emoji) for sidebar section headers
+const CATEGORY_META: Record<string, { label: string; icon: string }> = {
+  capture: { label: "Capture", icon: "📥" },
+  analyze: { label: "Analyze", icon: "🔍" },
+  create: { label: "Create", icon: "✏️" },
+  maintain: { label: "Maintain", icon: "🧹" },
+  automate: { label: "Automate", icon: "🤖" },
+  other: { label: "Other", icon: "•" }, // fallback for skills w/o category
+};
 
 const SKILLS: SkillDef[] = [
   // Primary — 3 daily drivers (pre-checked in onboarding + full-width in sidebar)
-  { id: "process-transcripts", label: "Synthesise Files", description: "Synthesise raw files (transcripts, notes, backlog) into vault modules", primary: true },
-  { id: "whatsapp-digest", label: "WhatsApp Digest", description: "Analyze WhatsApp groups — action items, blindspots, vault staleness", primary: true },
-  { id: "gsuite-analysis", label: "Gmail + Calendar", description: "Inbox sweep, stale follow-ups, calendar gap analysis, meeting prep (via MCP tools)", primary: true },
+  { id: "process-transcripts", label: "Synthesise Files", description: "Synthesise raw files (transcripts, notes, backlog) into vault modules", primary: true, stars: 5, difficulty: "operator", value: "high", scope: "native-mc", requires: ["vault-structure"], category: "capture" },
+  { id: "whatsapp-digest", label: "WhatsApp Digest", description: "Analyze WhatsApp groups — action items, blindspots, vault staleness", primary: true, stars: 4, difficulty: "expert", value: "high", scope: "native-mc", requires: ["vault-structure", "whatsapp-macos"], category: "capture" },
+  { id: "gsuite-analysis", label: "Gmail + G-Suite", description: "Full Google Workspace playbook — 25 MCP tools across Gmail, Calendar, Drive, Docs, Sheets, Slides", primary: true, stars: 4, difficulty: "expert", value: "high", scope: "universal", requires: ["gsuite-connected"], category: "analyze" },
   // Secondary — available but not pre-checked
-  { id: "start-here", label: "Start Here", description: "Onboarding agent — scan vault, build modular-context structure" },
-  { id: "pulse", label: "Pulse", description: "Vault health check — staleness radar, strategic questions, next steps" },
-  { id: "brief", label: "Brief", description: "Generate PDF brief or one-pager from vault knowledge" },
-  { id: "log", label: "Log", description: "Close session — generate session log, commit changes" },
-  { id: "ideas", label: "Ideas", description: "Generate new ideas from vault context using creative triggers" },
-  { id: "reweave", label: "Reweave", description: "Cascade-update stale or disconnected modules" },
-  { id: "vault-audit", label: "Vault Audit", description: "Audit vault structure — broken links, orphans, naming issues" },
-  { id: "graph", label: "Graph", description: "Analyze knowledge graph — clusters, bridges, dependency depth" },
-  { id: "graduate", label: "Graduate", description: "Promote buried transcript insights into standalone modules" },
+  { id: "start-here", label: "Start Here", description: "Onboarding agent — scan vault, build modular-context structure", category: "maintain" },
+  { id: "pulse", label: "Pulse", description: "Vault health check — staleness radar, strategic questions, next steps", stars: 5, difficulty: "operator", value: "high", scope: "native-mc", requires: ["vault-structure"], category: "analyze" },
+  { id: "brief", label: "Brief", description: "Generate PDF brief or one-pager from vault knowledge", stars: 5, difficulty: "operator", value: "high", scope: "universal", requires: ["python3"], category: "create" },
+  { id: "log", label: "Log", description: "Close session — generate session log, commit changes", stars: 4, difficulty: "learner", value: "medium", scope: "universal", requires: ["git-initialized"], category: "maintain" },
+  { id: "ideas", label: "Ideas", description: "Generate new ideas from vault context using creative triggers", stars: 4, difficulty: "learner", value: "medium", scope: "universal", category: "create" },
+  { id: "reweave", label: "Reweave", description: "Cascade-update stale or disconnected modules", stars: 4, difficulty: "expert", value: "high", scope: "native-mc", requires: ["vault-structure", "process-transcripts"], category: "maintain" },
+  { id: "vault-audit", label: "Vault Audit", description: "Audit vault structure — broken links, orphans, naming issues", stars: 4, difficulty: "operator", value: "medium", scope: "universal", category: "analyze" },
+  { id: "graph", label: "Graph", description: "Analyze knowledge graph — clusters, bridges, dependency depth", stars: 4, difficulty: "expert", value: "medium", scope: "universal", requires: ["python3"], category: "analyze" },
+  { id: "graduate", label: "Graduate", description: "Promote buried transcript insights into standalone modules", stars: 4, difficulty: "operator", value: "high", scope: "native-mc", requires: ["vault-structure", "process-transcripts"], category: "maintain" },
+  { id: "skills-audit", label: "Skills Audit", description: "Scan your library → 4-bucket report + contribution motivators", stars: 4, difficulty: "learner", value: "medium", scope: "universal", category: "analyze" },
 ];
+
+// Known setup flags evaluated at install-time for prereq gating
+function evaluateSetupFlag(flag: string, app: App): boolean {
+  const fs = require("fs");
+  const path = require("path");
+  const vaultBase = (app.vault.adapter as any).basePath as string;
+  switch (flag) {
+    case "vault-structure":
+      return fs.existsSync(path.join(vaultBase, "CLAUDE.md"));
+    case "gsuite-connected":
+      return fs.existsSync(path.join(require("os").homedir(), ".modular-context", "mcp-google", "accounts-index.json"));
+    case "whatsapp-macos":
+      return (process as any).platform === "darwin" && fs.existsSync("/Applications/WhatsApp.app");
+    case "git-initialized":
+      return fs.existsSync(path.join(vaultBase, ".git"));
+    case "python3":
+      try { require("child_process").execSync("command -v python3", { stdio: "ignore" }); return true; }
+      catch { return false; }
+    default:
+      return true; // unknown flag — pass-through (don't block)
+  }
+}
+
+// Check skill prereqs against installed + setup flags. Returns missing items or [].
+function checkSkillPrereqs(skill: SkillDef, installedIds: Set<string>, app: App): string[] {
+  if (!skill.requires || skill.requires.length === 0) return [];
+  const missing: string[] = [];
+  for (const req of skill.requires) {
+    // If it's a skill id, check installed
+    if (SKILLS.some((s) => s.id === req)) {
+      if (!installedIds.has(req)) missing.push(`skill:${req}`);
+    } else {
+      // Otherwise treat as setup flag
+      if (!evaluateSetupFlag(req, app)) missing.push(`setup:${req}`);
+    }
+  }
+  return missing;
+}
 
 
 // (KanbanView removed — kanban is now integrated into TerminalView sidebar)
@@ -3932,7 +4236,7 @@ export default class TerminalPlugin extends Plugin {
    * account's tokens (legacy single-account flow).
    */
   async syncMcpOnConnect(accountId?: string): Promise<void> {
-    const { syncOnConnect } = await import("./src/google/mcp-config/mcp-sync");
+    const { syncOnConnect, reconcileMcpSidecar } = await import("./src/google/mcp-config/mcp-sync");
     const storage = this.getGoogleStorage() as any;
     const multi = typeof storage.getMulti === "function" ? storage.getMulti() : null;
 
@@ -3946,6 +4250,17 @@ export default class TerminalPlugin extends Plugin {
     const result = syncOnConnect(tokens, this.getMcpSyncOptions());
     if (result.message) new Notice(`Modular Context: ${result.message}`);
     if (!result.ok) console.error("[mc] MCP sync failed:", result.error);
+
+    // Auto-reconcile sidecar with plugin-side truth — prunes zombie entries
+    if (multi) {
+      try {
+        const accounts = await multi.listAccounts();
+        const primary = await multi.getPrimaryAccountId();
+        reconcileMcpSidecar(accounts, primary);
+      } catch (err) {
+        console.error("[mc] post-connect reconcile failed:", err);
+      }
+    }
   }
 
   /**
@@ -4151,6 +4466,25 @@ export default class TerminalPlugin extends Plugin {
       id: "google-workspace-add-account",
       name: "Google Workspace: Add another account",
       callback: openConnectGoogle,
+    });
+
+    this.addCommand({
+      id: "google-workspace-repair",
+      name: "Google Workspace: Repair MCP sidecar (reconcile)",
+      callback: async () => {
+        const storage = this.getGoogleStorage() as any;
+        const multi = typeof storage.getMulti === "function" ? storage.getMulti() : null;
+        if (!multi) {
+          new Notice("Google Workspace: no multi-account storage available");
+          return;
+        }
+        const accounts = await multi.listAccounts();
+        const primary = await multi.getPrimaryAccountId();
+        const { reconcileMcpSidecar } = await import("./src/google/mcp-config/mcp-sync");
+        const result = reconcileMcpSidecar(accounts, primary);
+        new Notice(`Modular Context: ${result.message ?? (result.ok ? "reconciled" : "failed")}`);
+        if (!result.ok) console.error("[mc] sidecar reconcile failed:", result.error);
+      },
     });
 
     this.addCommand({

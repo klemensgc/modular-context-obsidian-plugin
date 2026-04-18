@@ -1287,10 +1287,14 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
   margin-left: auto;
 }
 
-/* When 3 items: left auto-right auto-left keeps info centered */
-.mc-sidebar-toolbar-btn:nth-child(2) {
-  margin-left: auto;
-  margin-right: auto;
+/* Anti-flicker button — active state shows accent tint */
+.mc-sidebar-flicker-btn.is-active {
+  color: var(--interactive-accent);
+  opacity: 1;
+}
+
+.mc-sidebar-flicker-btn.is-active:hover {
+  color: var(--interactive-accent-hover);
 }
 
 /* Compact icon button — base for skills, sessions, controls */
@@ -1917,15 +1921,164 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
 }
 
 /* --- Onboarding modal --- */
+/* Outer modal container — override Obsidian default width */
+.mc-onboarding-modal-container {
+  width: 860px !important;
+  max-width: 94vw !important;
+}
+
+.mc-onboarding-modal-container .modal-content {
+  padding: 20px 24px 22px;
+}
+
 .mc-onboarding-modal {
   font-family: var(--font-interface);
+  display: flex;
+  flex-direction: column;
+}
+
+.mc-onboarding-body-wrap {
+  display: grid;
+  grid-template-columns: 172px 1fr;
+  gap: 20px;
+  height: 560px;
+}
+
+/* Sidebar nav — column, dock pinned to bottom */
+.mc-onboarding-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-right: 14px;
+  border-right: 1px solid var(--background-modifier-border);
+}
+
+.mc-onboarding-tab {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 0.12s, color 0.12s;
+  border-left: 3px solid transparent;
+  user-select: none;
+}
+
+.mc-onboarding-tab:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.mc-onboarding-tab.is-active {
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  border-left-color: var(--interactive-accent);
+}
+
+.mc-onboarding-tab-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: currentColor;
+}
+
+.mc-onboarding-tab-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.mc-onboarding-tab-label {
+  flex: 1;
+}
+
+/* Provider dock (sidebar bottom) */
+.mc-onboarding-dock {
+  margin-top: auto;
+  padding: 10px 2px 2px;
+  border-top: 1px solid var(--background-modifier-border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mc-onboarding-dock-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+  padding: 0 4px;
+}
+
+.mc-provider-segment.is-compact {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 2px;
+}
+
+.mc-provider-segment.is-compact .mc-provider-segment-btn {
+  padding: 5px 0;
+  font-size: 11.5px;
+  text-align: center;
+  justify-content: center;
+}
+
+/* Content area */
+.mc-onboarding-content {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.mc-onboarding-panel {
+  display: none;
+  min-height: 0;
+}
+
+.mc-onboarding-panel.is-active {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  animation: mc-panel-fade 0.18s ease-out;
+}
+
+/* Skills panel gets scrollable inner content because skill list is long */
+.mc-onboarding-panel .mc-onboarding-skill-picker {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+@keyframes mc-panel-fade {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.mc-onboarding-panel h4 {
+  margin: 0 0 6px;
+}
+
+.mc-onboarding-panel h4:not(:first-child) {
+  margin-top: 14px;
 }
 
 .mc-onboarding-header {
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  margin-bottom: 18px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
 }
 
 .mc-onboarding-header-icon {
@@ -1954,7 +2107,7 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
 }
 
 .mc-onboarding-modal h4 {
-  margin: 16px 0 8px;
+  margin: 12px 0 6px;
   font-size: 13px;
   font-weight: 600;
   color: var(--text-normal);
@@ -1972,8 +2125,8 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
 .mc-onboarding-steps {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-bottom: 4px;
+  gap: 6px;
+  margin-bottom: 2px;
 }
 
 .mc-onboarding-step {
@@ -1986,12 +2139,12 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   background: rgba(var(--interactive-accent-rgb, 0, 122, 255), 0.1);
   color: var(--interactive-accent);
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 600;
   flex-shrink: 0;
   margin-top: 1px;
@@ -2000,7 +2153,7 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
 .mc-onboarding-step-text {
   font-size: 12.5px;
   color: var(--text-muted);
-  line-height: 1.5;
+  line-height: 1.45;
 }
 
 .mc-onboarding-step-text strong {
@@ -2010,20 +2163,21 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
 
 /* Vault setup list */
 .mc-onboarding-vault-list {
-  margin: 0 0 4px;
+  margin: 0 0 2px;
   padding-left: 20px;
 }
 
 .mc-onboarding-vault-list li {
   font-size: 12px;
   color: var(--text-muted);
-  line-height: 1.7;
+  line-height: 1.5;
+  margin-bottom: 2px;
 }
 
 /* CTA button */
 .mc-onboarding-cta {
-  margin-top: 18px;
-  padding-top: 14px;
+  margin-top: auto;
+  padding-top: 12px;
   border-top: 1px solid var(--background-modifier-border);
 }
 
@@ -2053,11 +2207,11 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
 }
 
 .mc-onboarding-cta-desc {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   font-size: 11px;
   color: var(--text-faint);
   text-align: center;
-  line-height: 1.5;
+  line-height: 1.4;
 }
 
 /* Skill edit modal */
@@ -2144,20 +2298,44 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
 
 /* --- Onboarding Skill Picker --- */
 
-.mc-onboarding-skill-picker {
-  margin: 8px 0 16px;
-  max-height: 320px;
-  overflow-y: auto;
+.mc-onboarding-skill-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--background-secondary);
   border: 1px solid var(--background-modifier-border);
   border-radius: 6px;
-  padding: 8px;
+  margin: 8px 0 10px;
+}
+
+.mc-onboarding-skill-controls .mc-onboarding-skill-row.is-master {
+  flex: 1;
+  padding: 0;
+  margin: 0;
+  border: none;
+}
+
+.mc-onboarding-skill-controls .mc-onboarding-install-btn {
+  padding: 6px 14px;
+  font-size: 12px;
+  border-radius: 5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.mc-onboarding-skill-picker {
+  margin: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 6px 10px 8px;
 }
 
 .mc-onboarding-skill-row {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  padding: 4px 0;
+  padding: 3px 0;
 }
 
 .mc-onboarding-skill-row.is-master {
@@ -2770,49 +2948,191 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
   color: var(--text-normal);
 }
 
-/* OnboardingModal "Connect accounts" section integration */
-.mc-onboarding-connect-accounts {
-  margin: 12px 0 20px;
-  padding: 12px 14px;
-  background: var(--background-secondary);
-  border-radius: 6px;
+/* OnboardingModal "Connected accounts" — card-based */
+.mc-account-card-host {
+  margin: 14px 0 18px;
 }
 
-.mc-onboarding-connect-accounts-row {
+.mc-account-card {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px 18px;
+  border-radius: 10px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-left: 3px solid transparent;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.mc-account-card.is-disconnected {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 14px;
+}
+
+.mc-account-card.is-disconnected .mc-account-card-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  cursor: pointer;
-  padding: 8px 0;
+  gap: 14px;
 }
 
-.mc-onboarding-connect-accounts-row:hover {
-  opacity: 0.8;
+.mc-account-card.is-connected {
+  border-left-color: #22c55e;
+  background:
+    linear-gradient(90deg, rgba(34, 197, 94, 0.06), transparent 55%),
+    var(--background-secondary);
 }
 
-.mc-connection-pill {
-  font-size: 11px;
-  padding: 3px 10px;
+.mc-account-avatar {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
   border-radius: 10px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.mc-connection-pill.is-disconnected {
-  background: var(--background-modifier-border);
+.mc-account-avatar svg {
+  width: 22px;
+  height: 22px;
+}
+
+.mc-account-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mc-account-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mc-account-title-row strong {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.mc-account-email {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mc-account-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 11.5px;
   color: var(--text-muted);
 }
 
-.mc-connection-pill.is-connected {
-  background: rgba(34, 197, 94, 0.15);
-  color: #16a34a;
+.mc-account-status-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.15);
 }
 
-.mc-connection-pill.is-error {
-  background: rgba(220, 38, 38, 0.15);
-  color: #dc2626;
+.mc-account-status-text {
+  font-weight: 500;
+  color: var(--text-normal);
+}
+
+.mc-account-status-text::first-letter {
+  text-transform: uppercase;
+}
+
+.mc-account-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.mc-account-manage-btn {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: transparent;
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.mc-account-manage-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+  border-color: var(--background-modifier-border-hover);
+}
+
+/* Google-branded OAuth button — used in ConnectGoogleModal + disconnected card */
+.mc-oauth-button-google {
+  all: unset;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 11px 18px;
+  font-family: var(--font-interface);
+  font-size: 13.5px;
+  font-weight: 550;
+  color: var(--text-normal);
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.08s;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.mc-oauth-button-google:hover {
+  background: var(--background-modifier-hover);
+  border-color: var(--background-modifier-border-hover);
+}
+
+.mc-oauth-button-google:active {
+  transform: scale(0.985);
+}
+
+.mc-oauth-button-google-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.mc-oauth-button-google-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.mc-oauth-button-google-label {
+  line-height: 1;
 }
 
 /* --- RestorePickerModal --- */
