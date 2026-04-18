@@ -26,32 +26,37 @@ One install, one onboarding, two productivity frontiers.
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────┐
-│  OBSIDIAN VAULT (your knowledge)                     │
-│  ┌────────────┐  ┌───────────┐  ┌────────────┐       │
-│  │  Sources   │→ │   Wiki    │→ │  Schema    │       │
-│  │ (_transc.) │  │ (modules) │  │ (CLAUDE.md)│       │
-│  └────────────┘  └───────────┘  └────────────┘       │
-└──────────────────────┬───────────────────────────────┘
-                       │ reads / writes
-      ┌────────────────▼──────────────────┐
-      │      MODULAR CONTEXT PLUGIN       │
-      │  • Terminal panes (Claude, Codex) │
-      │  • Skills sidebar + launcher      │
-      │  • OAuth + encrypted token store  │
-      │  • Multi-account credentials      │
-      └────────────────┬──────────────────┘
-                       │ writes .mcp.json + credential sidecars
-      ┌────────────────▼──────────────────┐
-      │  mcp-google-workspace (Node)      │
-      │  spawned by Claude Code via stdio │
-      │  10 tools: Gmail + Calendar       │
-      │  stateless per-call, hot reload   │
-      └────────────────┬──────────────────┘
-                       │ HTTPS
-                ┌──────▼──────┐
-                │  Google API │
-                └─────────────┘
+                    🦀  LLM KNOWLEDGE BASE
+                    ┌────────────────────────┐
+                    │   Sources · Wiki ·     │
+                    │   Schema  (vault)      │
+                    └───────┬────────▲───────┘
+                            │        │
+                 feed every │        │ write digest /
+                 new session│        │ synthesise back
+                            ▼        │
+           ╔═════════════════════════╧════════════════════╗
+           ║     🦀  CLAUDE CODE  (sessions · terminals)  ║
+           ║                                              ║
+           ║     ⟲  inbox digest loop                     ║
+           ║     ⟲  meeting prep loop                     ║
+           ║     ⟲  synthesise-files loop                 ║
+           ╚═══════════╦════════════════════╦═════════════╝
+                       │                    │
+                pulls  │                    │  pushes
+                       ▼                    ▼
+           ┌──────────────────────────────────────────┐
+           │   🦀  mcp-google   (stdio · Node)        │
+           └───────────┬──────────────────────┬───────┘
+                       ▼                      ▼
+                    🦀  GOOGLE WORKSPACE (multi-account)
+                    ├─ Gmail   ✓    ← read   → send/draft/label
+                    ├─ GCal    ✓    ← list   → create/update/delete
+                    ├─ Docs    ⋯  coming soon
+                    └─ Drive   ⋯  coming soon
+
+        ── configured by ──▶  🦀  Modular Context Plugin
+                               (infra · OAuth · sidecar)
 ```
 
 **Architecture decisions** (ADRs in `_workspace/2026-04/w3/google-workspace/adrs/`):
@@ -77,6 +82,7 @@ One install, one onboarding, two productivity frontiers.
 - **Wiki-link autocomplete** — `[[` inside terminal searches vault notes.
 - **Drag-and-drop** — Finder / Obsidian → terminal as shell-escaped paths.
 - **Session persistence** — tab names, glyphs, layouts survive restarts.
+- **Smart Session Restore** — on reopen, picker modal classifies saved sessions (Needs attention / Idle / Archive) instead of silent auto-resume. You choose what materializes — no accidental skill re-runs.
 - **Auto-onboarding** — first install triggers a setup agent that scaffolds your vault.
 
 ### G-Suite MCP Server (v2.0 stable)
@@ -214,8 +220,9 @@ Full threat model in `ADR-003-addendum-shared-state.md`.
 - New `gsuite-analysis` skill — orchestrates 10 MCP tools with 4 playbook patterns
 - Graduated v1.5 / v1.6 / v1.7 beta milestones: OAuth + storage + MCP server + multi-account + full control
 - OAuth scope upgrade: `gmail.modify` + `calendar` full (replaces `gmail.readonly`, `gmail.send`, `calendar.events`)
-- `mcp-google-workspace` @ 1.0.0 stable (from 1.1.0-beta.1)
+- `mcp-google-workspace` @ 1.1.0 stable (from 1.1.0-beta.1)
 - New tools: `gmail_send`, `gmail_modify_labels`, `calendar_list_calendars`, `calendar_update_event`, `calendar_delete_event`, `calendar_freebusy`
+- **Smart Session Restore Picker** — replaces silent auto-resume on plugin reopen. Modal classifies saved sessions into Needs attention / Idle / Archive buckets; you pick what materializes. No accidental skill re-runs, no hidden respawns.
 
 Full list in [CHANGELOG.md](CHANGELOG.md).
 

@@ -22,6 +22,8 @@ First stable release. Graduates v1.5 / v1.6 / v1.7 beta milestones into one prod
 
 🎯 **3 primary skills** post-onboarding: **Synthesise Files** (ingest raw files → vault), **WhatsApp Digest**, **Gmail + Calendar** (new playbook orchestrating 10 MCP tools).
 
+🔁 **Smart Session Restore Picker** — no more silent auto-resume on plugin reopen. Modal classifies sessions (Needs attention / Idle / Archive), you choose what materializes. No accidental `/process-transcripts` re-runs, no hidden respawns.
+
 📘 **5 ADRs** — architecture decisions documented (OAuth hybrid, token storage, MCP lifecycle + addendum, multi-account storage).
 
 ---
@@ -72,6 +74,7 @@ No data loss. Onboarding state persists; your primary skill list may look differ
 1. **OAuth scopes expanded** — `gmail.readonly` + `gmail.send` → `gmail.modify`. `calendar.events` → `calendar` (full). Re-consent needed (plugin detects + prompts automatically).
 2. **"Ingest Data" label renamed** to **"Synthesise Files"** (skill ID `process-transcripts` unchanged — state memory + references preserved).
 3. **Primary skills reselected** — sidebar will show 3 new primary skills on first v2.0 load. User can customize via sidebar context menu.
+4. **Plugin reopen no longer silent auto-resume** — previous versions restored ALL saved sessions automatically and re-fired their skill commands (risk: duplicate `/process-transcripts` runs). v2.0 shows a picker modal instead; unchecked sessions move to Archive bucket (preserved, not deleted).
 
 See [CHANGELOG.md](CHANGELOG.md) for complete details.
 
