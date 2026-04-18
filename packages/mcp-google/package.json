@@ -1,0 +1,41 @@
+{
+  "name": "@modular-context/mcp-google-workspace",
+  "version": "1.1.0",
+  "description": "MCP server exposing Gmail + Calendar tools for Claude Code, designed for the modular-context Obsidian plugin",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "bin": {
+    "mcp-google-workspace": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "node esbuild.config.mjs",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "google-auth-library": "^10.6.2",
+    "googleapis": "^171.4.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.4.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "gmail",
+    "google-calendar",
+    "claude-code",
+    "obsidian"
+  ]
+}

@@ -1,8 +1,8 @@
-# Modular Context
+# Modular Context | Karpathy LLM Knowledge Base + Gmail & G-Cal
 
 ![banner](banner.png)
 
-> Frictionless multi-terminal AI agent management inside Obsidian — run Claude Code and Codex side-by-side with skills, session tracking, and split layouts. By receptionOS.
+> *Your Obsidian vault as LLM-native knowledge base + multi-account Gmail & Calendar exposed as MCP tools for Claude Code. Local-first, encrypted, no telemetry.*
 
 ![Version](https://img.shields.io/github/v/release/klemensgc/modular-context-obsidian-plugin)
 ![License](https://img.shields.io/github/license/klemensgc/modular-context-obsidian-plugin)
@@ -13,222 +13,237 @@
 
 ## What is this?
 
-An Obsidian plugin that gives you **multiple AI coding terminals side-by-side** — each running Claude Code or Codex — with a skills dashboard, agent tracking, and split layouts. No context-switching between apps.
+**Two things in one plugin:**
 
-**Multi-Terminal** — Real PTY shells with split/grid layouts (up to 8 panes). Each session has a unique visual glyph for instant recognition.
+1. **LLM Knowledge Base** — Your Obsidian vault structured as Sources → Wiki → Schema (Karpathy-aligned framing). Multi-terminal Claude Code + Codex with skills sidebar, agent tracking, session glyphs. Your second brain seen by LLMs as a first-class context.
 
-**Agent Dashboard** — One-click skill launcher, working/review states, session glyphs. Compact icon-only mode for maximum terminal space.
+2. **G-Suite MCP Server** — Multi-account Gmail + Calendar exposed as 10 native tools for Claude Code (`gmail_search`, `gmail_send`, `calendar_freebusy`, …). OAuth 2.0 + PKCE desktop flow, tokens encrypted via Electron `safeStorage` (OS keychain), no telemetry, no cloud.
 
-**Methodology** — Optional but powerful: frontmatter standards, cadence-based staleness, three-layer architecture (Sources → Wiki → Schema). Turns your vault into an LLM Wiki.
+One install, one onboarding, two productivity frontiers.
+
+---
+
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────┐
+│  OBSIDIAN VAULT (your knowledge)                     │
+│  ┌────────────┐  ┌───────────┐  ┌────────────┐       │
+│  │  Sources   │→ │   Wiki    │→ │  Schema    │       │
+│  │ (_transc.) │  │ (modules) │  │ (CLAUDE.md)│       │
+│  └────────────┘  └───────────┘  └────────────┘       │
+└──────────────────────┬───────────────────────────────┘
+                       │ reads / writes
+      ┌────────────────▼──────────────────┐
+      │      MODULAR CONTEXT PLUGIN       │
+      │  • Terminal panes (Claude, Codex) │
+      │  • Skills sidebar + launcher      │
+      │  • OAuth + encrypted token store  │
+      │  • Multi-account credentials      │
+      └────────────────┬──────────────────┘
+                       │ writes .mcp.json + credential sidecars
+      ┌────────────────▼──────────────────┐
+      │  mcp-google-workspace (Node)      │
+      │  spawned by Claude Code via stdio │
+      │  10 tools: Gmail + Calendar       │
+      │  stateless per-call, hot reload   │
+      └────────────────┬──────────────────┘
+                       │ HTTPS
+                ┌──────▼──────┐
+                │  Google API │
+                └─────────────┘
+```
+
+**Architecture decisions** (ADRs in `_workspace/2026-04/w3/google-workspace/adrs/`):
+- ADR-001 — Hybrid OAuth: Quick Connect (shared client) + BYO (user-provided client)
+- ADR-002 — Electron `safeStorage` token storage (OS keychain)
+- ADR-003 + addendum — MCP server stdio lifecycle + plaintext credentials sidecar
+- ADR-005 — Multi-account storage model (per-account folder + index)
 
 ---
 
 ## Features
 
-- **Multi-terminal split layouts** — Single, side-by-side, stacked, 2×2, 2×3, 2×4 grid. Up to 8 concurrent sessions
-- **Session glyphs** — Unique geometric shapes per terminal for instant visual recognition. Skill-launched sessions inherit the skill icon
-- **Claude Code + Codex support** — Toggle AI provider in settings. Auto-launches on new terminal
-- **Skills sidebar** — One-click Claude Code agent sessions for recurring workflows
-- **Agent tracker** — Working / To Review / Standby states for running agents
-- **Compact sidebar** — 48px icon-only mode. Collapse to maximize terminal space
-- **Fullscreen mode** — Terminal fills Obsidian with sidebar on the right. Escape to exit
-- **Real PTY terminal** — Full zsh shell in a pseudo-terminal, not a basic command runner
-- **Wiki-link autocomplete** — Type `[[` inside the terminal to search vault notes
-- **Drag-and-drop** — Drag files from Finder or Obsidian to paste shell-escaped paths
-- **Session persistence** — Tab names, glyphs, and layout survive restarts
-- **Auto-onboarding** — First install triggers a setup agent that builds your vault structure
-- **Google Workspace (Beta)** — Connect Gmail + Calendar as MCP tools for Claude Code. Tokens encrypted locally via Electron safeStorage + OS keychain. [Setup guide below](#google-workspace-beta)
+### LLM Knowledge Base
+
+- **Multi-terminal split layouts** — single, side-by-side, stacked, 2×2, 2×3, 2×4. Up to 8 sessions.
+- **Claude Code + Codex** — toggle AI provider in settings; auto-launch on new terminal.
+- **Skills sidebar** — 3 primary skills (full-width), rest in secondary grid. One-click launches.
+- **Agent tracker** — Working / To Review / Standby states per session.
+- **Session glyphs** — unique geometric shape per terminal. Skills inherit their icon.
+- **Compact mode** — 48px icon-only sidebar, maximum terminal real estate.
+- **Fullscreen overlay** — terminal fills Obsidian; sidebar docks right. `Esc` to exit.
+- **Real PTY** — zsh in a pseudo-terminal, not a basic runner.
+- **Wiki-link autocomplete** — `[[` inside terminal searches vault notes.
+- **Drag-and-drop** — Finder / Obsidian → terminal as shell-escaped paths.
+- **Session persistence** — tab names, glyphs, layouts survive restarts.
+- **Auto-onboarding** — first install triggers a setup agent that scaffolds your vault.
+
+### G-Suite MCP Server (v2.0 stable)
+
+- **Multi-account** — unlimited Google accounts in parallel (Testing mode: up to 100 test users per account)
+- **10 tools** for Claude Code (Gmail + Calendar — see table below)
+- **Zero telemetry** — no metrics, no crash reports, no external calls beyond OAuth + Google API
+- **Local-first** — tokens encrypted via OS keychain (macOS Keychain / Windows DPAPI / Linux libsecret via `libsecret`)
+- **Auto-refresh** — 50-minute timer per account, 5-minute expiry buffer
+- **Error taxonomy** — `TOKEN_EXPIRED`, `ACCOUNT_NOT_FOUND`, `SCOPE_OUTDATED`, `RATE_LIMITED`, `PERMISSION_DENIED`, `QUOTA_EXCEEDED`, `NETWORK_ERROR`
+- **Hot reload** — server re-reads credentials per tool call, zero-downtime refresh
 
 ---
 
-## Google Workspace (Beta)
+## 3 primary skills (post-onboarding)
 
-Open-source, local-first alternative to Shortwave/Superhuman/Sauna. Your Gmail + Calendar as tools Claude Code can call — tokens encrypted locally, never leave your machine.
+| Skill | Purpose | Uses |
+|-------|---------|------|
+| **Synthesise Files** | Turn raw files (transcripts, notes, backlog) into vault modules — categorize, tag, update, reweave neighbors | Your vault, optional `_transcripts-backlog/` |
+| **WhatsApp Digest** | Analyze WhatsApp groups for action items, blindspots, staleness vs vault | macOS WhatsApp.app |
+| **Gmail + Calendar** | Inbox sweep, stale follow-ups, calendar gap analysis, meeting prep | MCP tools below |
 
-**Architecture:**
-- OAuth 2.0 desktop flow with loopback redirect + PKCE S256
-- Tokens encrypted via Electron `safeStorage` (OS keychain backs it)
-- Stored in `vault/.modular-context/tokens.enc` (AES-256, auto `.gitignore`)
-- MCP server integration planned for W2 (exposes `gmail_search`, `gmail_draft`, `calendar_list_events`, `calendar_create_event`)
-
-**Two connect paths:**
-
-1. **Quick Connect (beta, hosted)** — uses a shared OAuth client. Limit 100 users during beta. Zero setup.
-2. **Bring Your Own OAuth Client** — you create your own Google Cloud OAuth client. Unlimited users, full sovereignty. ~5 min setup.
-
-**Setup:** open the `(i)` info modal → "Connect accounts" section → click Google Workspace. Alternatively use command palette: `Google Workspace: Connect`.
-
-**Commands:**
-- `Google Workspace: Connect` — open onboarding modal
-- `Google Workspace: Disconnect` — clear tokens
-- `Google Workspace: Reconnect` — switch accounts
-- `Google Workspace: Status` — show connection state
-
-**Privacy:** no cloud, no telemetry. Server logs never contain tokens, email bodies, or subject lines. Uninstall = true uninstall.
+All three write artifacts to `_workspace/{YYYY-MM}/w{N}/`. Secondary skills (Pulse, Brief, Log, Reweave, Graph, Graduate, Ideas, Vault-Audit) available in sidebar grid.
 
 ---
 
-## The Modular Context Methodology
+## 10 MCP tools
 
-### Three Layers
+### Gmail (4)
 
-1. **Raw Sources** (`_transcripts/`, `_transcripts-backlog/`) — Your curated source material. Immutable. The LLM reads but never modifies.
-2. **The Wiki** (project folders with `*_index.md`) — LLM-generated, interlinked knowledge modules. Summaries, entity pages, syntheses.
-3. **The Schema** (`CLAUDE.md` + `_claude/`) — Conventions, templates, and skill references that teach the LLM how your vault works.
+| Tool | Purpose |
+|------|---------|
+| `gmail_search` | Query with Gmail syntax (`is:unread`, `from:X`, `after:2026-04-01`). Optional body extraction. |
+| `gmail_draft` | Create draft — not sent. User opens `webUrl` in Gmail UI to send. |
+| `gmail_send` | Send immediately. Skip draft for trusted, scripted sends. |
+| `gmail_modify_labels` | Add/remove labels — system presets (`INBOX`, `UNREAD`, `STARRED`, `IMPORTANT`, `SPAM`, `TRASH`) + custom labels by name. |
 
-### Three Operations
+### Calendar (6)
 
-| Operation | What it does | Skill |
-|-----------|-------------|-------|
-| **INGEST** | Process new sources into wiki modules | `/process-transcripts` |
-| **QUERY** | Ask questions, synthesize answers, file insights back | `/brief`, `/ideas` |
-| **LINT** | Health-check: staleness, orphans, broken links | `/pulse`, `/vault-audit`, `/reweave`, `/graph` |
+| Tool | Purpose |
+|------|---------|
+| `calendar_list_calendars` | Enumerate all calendars user has access to. |
+| `calendar_list_events` | Events in time range. |
+| `calendar_create_event` | Create event (`sendUpdates: "none"` default — no auto-invite spam). |
+| `calendar_update_event` | Patch existing (only provided fields changed). |
+| `calendar_delete_event` | Delete. |
+| `calendar_freebusy` | Query busy windows across multiple calendars — ideal for "find time to meet". |
 
-### Frontmatter Standard
+**Every tool accepts optional `account` param** (email, case-insensitive). Omit → primary account. Unknown email → `ACCOUNT_NOT_FOUND` error.
 
-Every file gets structured metadata:
-
-```yaml
----
-title: Module Name
-updated: 2026-04-05
-status: stable        # stable | draft | needs-update | stub
-cadence: tactical     # hot (7d) | tactical (30d) | iron-cold (60d) | frozen
-depends-on: [[related-file]]
-sources: [[transcript-name]]
----
-```
-
-### Cadence System
-
-Temperature-based staleness scoring:
-
-```
-staleness = days_since_update / cadence_days
-
-< 0.5  → fresh (green)
-0.5–1  → aging (yellow)
-1–2    → stale (orange)
-> 2    → critical (red)
-```
-
-A `pipeline.md` (hot, 7d) untouched for 10 days is **stale** (ratio 1.4). A `vision.md` (iron-cold, 60d) untouched for 40 days is **fresh** (ratio 0.67). The vault tells you what needs attention.
+**OAuth scopes required:** `gmail.modify`, `calendar`, plus OIDC `openid email profile`.
 
 ---
 
-## Built-in Skills
+## Install
 
-| Skill | Description |
-|-------|-------------|
-| **Ingest Data** | Process new sources — categorize, extract insights, update wiki modules |
-| **Pulse** | Vault health check — staleness radar, strategic questions, next steps |
-| **Brief** | Generate PDF brief or one-pager from vault knowledge |
-| **Log** | Close session — generate session log, commit changes |
-| **Ideas** | Generate new ideas from vault context using creative triggers |
-| **Reweave** | Cascade-update stale or disconnected modules |
-| **Vault Audit** | Audit vault structure — broken links, orphans, naming issues |
-| **Graph** | Analyze knowledge graph — clusters, bridges, dependency depth |
-| **Graduate** | Promote buried transcript insights into standalone modules |
+### Plugin
 
-Add custom skills with the **[+]** button. Each skill maps to a Claude Code `/skill-name` command defined in `.claude/skills/`.
+Requires Obsidian ≥ 0.15 and macOS (Linux + Windows may work; untested).
 
----
+**Via BRAT (Beta Reviewer plugin, recommended for now):**
+1. Install BRAT from Community Plugins
+2. `Cmd+P` → "BRAT: Add a beta plugin" → `klemensgc/modular-context-obsidian-plugin`
+3. Enable in Settings → Community plugins
 
-## Installation
+**Manual:**
+1. Download `main.js`, `manifest.json`, `styles.css`, `mcp-server.js` from [latest release](https://github.com/klemensgc/modular-context-obsidian-plugin/releases)
+2. Copy to `<vault>/.obsidian/plugins/modular-context/`
+3. Enable plugin in Settings → Community plugins → Modular Context
 
-### With BRAT (recommended — auto-updates)
+### MCP server
 
-1. Install the [BRAT plugin](https://github.com/TfTHacker/obsidian42-brat) from Obsidian's community plugins
-2. Open BRAT settings and click **Add Beta plugin**
-3. Enter `klemensgc/modular-context-obsidian-plugin` and click Add Plugin
-4. Enable the plugin in Settings > Community Plugins
-
-### Manual
-
-1. Download from the [latest release](https://github.com/klemensgc/modular-context-obsidian-plugin/releases/latest)
-2. Unzip into your vault's `.obsidian/plugins/modular-context/`
-3. Restart Obsidian, then enable the plugin in Settings > Community Plugins
+**Auto-installed** on first `Google Workspace: Connect`. Plugin copies bundled binary to `~/.modular-context/mcp-google/dist/index.js` (~100 MB one-time).
 
 ---
 
-## Requirements
+## Connect Google Workspace (6 steps)
 
-- **macOS** (desktop only — uses Python PTY for real terminal)
-- **Python 3** (included with macOS)
-- **Claude Code CLI** or **Codex CLI** (for agent skills — [Claude install guide](https://docs.anthropic.com/en/docs/claude-code/overview))
+1. **Create GCP OAuth Client**
+   - [Google Cloud Console](https://console.cloud.google.com) → new project (e.g. `modular-context-gcp`)
+   - Enable APIs: Gmail API, Google Calendar API
+   - OAuth consent screen → External, Testing mode → add scopes: `gmail.modify`, `calendar`, plus `openid`, `email`, `profile`
+   - Add yourself as test user
+   - Create credentials → OAuth 2.0 Client ID → Desktop app
+   - Copy Client ID + Client Secret
 
----
+2. **Fill `.env.local`** in the plugin's build folder:
+   ```
+   GOOGLE_OAUTH_CLIENT_ID=...
+   GOOGLE_OAUTH_CLIENT_SECRET=...
+   ```
 
-## Usage
+3. **Rebuild** (`npm run build` in `packages/plugin`) if self-building. Pre-built release uses the shared Quick Connect client.
 
-### Opening the terminal
+4. **Reload plugin** — `Cmd+P` → "Reload app without saving"
 
-- Click the receptionOS icon in the ribbon (left sidebar)
-- Or use Command Palette → "Open Terminal"
+5. **Connect** — `Cmd+P` → "Google Workspace: Connect (or add account)" → browser OAuth → authorize → done
 
-### Terminal basics
+6. **Add more accounts** — "Google Workspace: Add another account" any time
 
-- **`+`** — New session (auto-launches Claude Code or Codex)
-- **Double-click** tab name — Rename it
-- **`[[`** — Wiki-link autocomplete from inside the terminal
-- **Drag files** onto the terminal — Pastes shell-escaped path
-- **Cmd+Shift+S** — Capture terminal output to a note
-
-### Skills
-
-Click any skill in the sidebar to launch a Claude Code session that executes it. The agent tracker shows:
-- **Working** — Agent is actively running
-- **To Review** — Agent finished, output ready for your review
-- **Standby** — Dismissed but still available
-
-### AI Provider
-
-Toggle between Claude Code and Codex in the (i) modal → Settings section. Each new terminal uses the selected provider.
-
-### Compact sidebar
-
-Click the chevron at the top of the sidebar to collapse to icon-only mode (48px). Click again to expand. Always starts expanded.
-
-### Auto-mode
-
-Toggle in the sidebar. When enabled, Claude Code runs with `--dangerously-skip-permissions` (or Codex with `--full-auto`) for fully autonomous operation. **Off by default** — enable when you trust the agent to work independently.
+The plugin writes `.mcp.json` to your vault root + per-account sidecars to `~/.modular-context/mcp-google/accounts/{filename}/`. **Restart Claude Code session** to pick up the MCP server.
 
 ---
 
-## Onboarding
+## Plugin commands
 
-On first install, the plugin automatically opens a setup wizard. Click **"Start Here →"** to launch an AI agent that:
+| Command | Purpose |
+|---------|---------|
+| `Google Workspace: Connect (or add account)` | Launch OAuth flow for new/additional account |
+| `Google Workspace: Add another account` | Alias for above — clearer intent |
+| `Google Workspace: Reconnect (upgrade scopes)` | Nuke tokens, re-auth all accounts with current scope set |
+| `Google Workspace: Disconnect all accounts` | Remove all credentials + `.mcp.json` entry |
+| `Google Workspace: Status` | List connected accounts, expiry times, scope status |
+| `Google Workspace: Show MCP server logs` | Open `~/.modular-context/mcp-google/logs/server.log` |
 
-1. Scans your vault structure
-2. Checks if CLAUDE.md exists (offers to extend or create fresh)
-3. Diagnoses which layer is weakest (sources, wiki, schema)
-4. Recommends and builds the modular-context structure for you
-
-You can re-trigger onboarding anytime from the sidebar.
-
----
-
-## Building from source
-
-```bash
-git clone https://github.com/klemensgc/modular-context-obsidian-plugin.git
-cd modular-context
-npm install
-npm run build
-```
-
-Copy `main.js`, `manifest.json`, and `styles.css` to your vault's `.obsidian/plugins/modular-context/`.
+Plus 5+ non-Google commands for terminal / skill management. See Command Palette.
 
 ---
 
-## Credits
+## Security
 
-Built on [internetvin-terminal](https://github.com/internetvin/internetvin-terminal) by Vin Verma (MIT License). Extended with multi-terminal management, agent dashboard, compact sidebar, Codex support, and the modular-context methodology.
+- **Tokens** encrypted via Electron `safeStorage` (OS keychain). Never leave disk in plaintext.
+- **Credentials sidecar** for MCP server: plaintext JSON at `0600` perms in user-scope folder (comparable to `~/.aws/credentials`, `~/.config/gcloud/`). Plugin may re-encrypt in v2.1 (see ADR-003 addendum).
+- **No telemetry.** No crash reports. No metrics. Zero phone-home.
+- **Logs** scrub tokens, emails, subjects via regex on every line.
+- **Multi-account isolation.** Each account has separate credentials; MCP server honors `account` param strictly.
 
-Inspired by Andrej Karpathy's [LLM Wiki](https://x.com/karpathy/status/1937538198696460718) concept.
+Full threat model in `ADR-003-addendum-shared-state.md`.
+
+---
+
+## What's new in v2.0
+
+- 3 primary skills reorganization — `Synthesise Files` (was "Ingest Data"), `WhatsApp Digest`, `Gmail + Calendar`
+- New `gsuite-analysis` skill — orchestrates 10 MCP tools with 4 playbook patterns
+- Graduated v1.5 / v1.6 / v1.7 beta milestones: OAuth + storage + MCP server + multi-account + full control
+- OAuth scope upgrade: `gmail.modify` + `calendar` full (replaces `gmail.readonly`, `gmail.send`, `calendar.events`)
+- `mcp-google-workspace` @ 1.0.0 stable (from 1.1.0-beta.1)
+- New tools: `gmail_send`, `gmail_modify_labels`, `calendar_list_calendars`, `calendar_update_event`, `calendar_delete_event`, `calendar_freebusy`
+
+Full list in [CHANGELOG.md](CHANGELOG.md).
+
+---
+
+## Troubleshooting
+
+| Issue | Fix |
+|-------|-----|
+| Notice: "Reconnect required for {email}" | `Google Workspace: Reconnect (upgrade scopes)` — scopes changed |
+| `TOKEN_EXPIRED` from MCP tool | User revoked access or refresh token rotated — `Reconnect` |
+| `ACCOUNT_NOT_FOUND` | Account not connected — `Add another account` |
+| MCP server not visible in Claude Code | Restart Claude Code session. `.mcp.json` loaded at session start. |
+| Plugin reloaded but old behavior | Hard reload: `Cmd+P` → "Reload app without saving" (not just disable+enable) |
+| Server logs empty | Normal — server only runs when Claude Code calls a tool. Not a daemon. |
+
+---
+
+## Contributing
+
+Plugin: [modular-context-obsidian-plugin](https://github.com/klemensgc/modular-context-obsidian-plugin)
+
+Skills library: [modular-context-skills](https://github.com/klemensgc/modular-context-skills) (separate repo, auto-synced)
+
+PRs welcome. Issues welcome. No support contract, but I read everything.
 
 ---
 
 ## License
 
-MIT — see [LICENSE](LICENSE)
+MIT © klemensgc / receptionOS

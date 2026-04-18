@@ -126,6 +126,21 @@ export class AgentTracker {
     return this.tracked.filter((t) => t.status === "to-review");
   }
 
+  /** Read status for a given session id, or undefined if not tracked */
+  getStatus(sessionId: number): TrackedSession["status"] | undefined {
+    return this.tracked.find((t) => t.sessionId === sessionId)?.status;
+  }
+
+  /** Read the TrackedSession entry for a given session id (exposes skillName, lastActivityAt) */
+  getTracked(sessionId: number): TrackedSession | undefined {
+    return this.tracked.find((t) => t.sessionId === sessionId);
+  }
+
+  /** Read recent non-empty lines from terminal buffer (public helper used by snapshot capture) */
+  readRecentLines(session: TrackableSession, count: number): string[] {
+    return this.getRecentLines(session, count);
+  }
+
   /** Read recent non-empty lines from terminal buffer */
   private getRecentLines(session: TrackableSession, count: number): string[] {
     const buf = session.terminal.buffer.active;

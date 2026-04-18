@@ -51,13 +51,28 @@ export {
   AUTO_DETECT_WINDOW_MS,
 } from "./agent/AgentTracker";
 
-// Google Workspace types (W1 — Google Workspace integration)
+// Google Workspace types (W1 + W2 + multi-account)
 export {
   type StoredTokens,
   type OAuthConfig,
   type TokenStorageMethod,
   type TokensMeta,
   type GoogleWorkspaceScope,
+  type AccountId,
+  type AccountIndex,
+  type AccountsIndex,
+  type MultiTokenStorage,
   MCGoogleError,
   GOOGLE_WORKSPACE_SCOPES,
+  emailToAccountFilename,
+  normalizeAccountId,
+  computeMissingScopes,
 } from "./google/types";
+
+// Session snapshots (smart restore picker)
+export {
+  type SessionSnapshot,
+  type RestoreState,
+  RESTORE_STATE_VERSION,
+  emptyRestoreState,
+} from "./session/snapshot";

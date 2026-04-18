@@ -17,11 +17,15 @@ import {
   REVIVE_BYTES,
   REVIVE_WINDOW_MS,
   AUTO_DETECT_WINDOW_MS,
+  emptyRestoreState,
+  RESTORE_STATE_VERSION,
   type FullscreenLayout,
   type DisplayMode,
   type Bookmark,
   type TrackedSession,
   type TrackableSession,
+  type SessionSnapshot,
+  type RestoreState,
 } from "@mc/shared";
 import { ConnectGoogleModal } from "./src/google/ui/connect-google-modal";
 import { createStorageMethod } from "./src/google/tokens/storage";
@@ -594,6 +598,10 @@ class TerminalSession {
   /** Visual glyph for compact sidebar. Glyph id (e.g. "circle") or skill icon name (e.g. "rocket"). */
   glyph = "";
   _lastStdoutAt = 0;
+  /** Skill id/label if session was launched from a skill (set by launchSkill). Null otherwise. */
+  skillName: string | null = null;
+  /** Cached cwd for snapshot restore. Not updated live — set on creation, restored on replay. */
+  cwd: string | null = null;
   private _activityCallback: ((session: TerminalSession) => void) | null = null;
   setActivityCallback(cb: ((session: TerminalSession) => void) | null) {
     this._activityCallback = cb;
@@ -603,6 +611,7 @@ class TerminalSession {
     this.id = id;
     this.name = `zsh ${id}`;
     this.app = app;
+    this.cwd = cwd;
 
     this.containerEl = parent.createDiv({ cls: "mc-terminal-session" });
 
@@ -959,6 +968,49 @@ class TerminalSession {
     return lines.join("\n").trimEnd();
   }
 
+  /** Read last N non-empty lines from terminal buffer (oldest first). */
+  readTail(count: number): string[] {
+    const buf = this.terminal.buffer.active;
+    const collected: string[] = [];
+    const start = Math.max(0, buf.length - 80);
+    for (let i = buf.length - 1; i >= start && collected.length < count; i--) {
+      const line = buf.getLine(i)?.translateToString(true)?.trimEnd();
+      if (line && line.trim().length > 0) collected.push(line);
+    }
+    return collected.reverse();
+  }
+
+  /** Capture a SessionSnapshot from this session's current state.
+   *  Called on view close / plugin unload for the restore picker.
+   *  tracker may be null if session was never tracked (plain zsh session). */
+  captureSnapshot(tracker: AgentTracker | null): SessionSnapshot {
+    const trackedSkill = tracker?.getTracked(this.id)?.skillName;
+    return {
+      id: this.id,
+      name: this.name,
+      glyph: this.glyph,
+      skillName: this.skillName ?? trackedSkill ?? undefined,
+      agentStatus: tracker?.getStatus(this.id),
+      bufferTail: this.readTail(30),
+      cwd: this.cwd ?? undefined,
+      lastActivityAt: this._lastStdoutAt || Date.now(),
+      archived: false,
+      savedAt: Date.now(),
+    };
+  }
+
+  /** Write a read-only preamble showing the previous session's last output into xterm.
+   *  Does NOT send any input to the PTY. Used when materializing a restored session. */
+  replayTail(lines: string[]) {
+    if (!lines || lines.length === 0) return;
+    const dim = "\x1b[2m";
+    const reset = "\x1b[0m";
+    const header = `${dim}─── previous session tail (read-only) ───${reset}`;
+    const footer = `${dim}─── end of tail — fresh shell below ───${reset}`;
+    const body = lines.map((l) => `${dim}│${reset} ${l}`).join("\r\n");
+    this.terminal.write(`${header}\r\n${body}\r\n${footer}\r\n\r\n`);
+  }
+
   fit() {
     try {
       this.fitAddon.fit();
@@ -1109,48 +1161,30 @@ class TerminalView extends ItemView {
     };
   }
 
+  /** Legacy session descriptors stashed by setState — resolved in onOpen against
+   *  the saveData snapshots. Used only for migration fallback when plugin was
+   *  upgraded from a pre-picker version (snapshots don't exist yet). */
+  _pendingLegacySessions: Array<{ id: number; name: string; glyph: string }> | null = null;
+  /** Guards against multiple picker invocations if Obsidian calls setState() twice */
+  _pickerHandled = false;
+
   async setState(state: any, result: any) {
     if (state?.sessions?.length > 0) {
-      // Destroy default session created by onOpen
-      for (const s of this.sessions) s.destroy();
-      this.sessions = [];
-      this.activeSession = null;
+      // Do NOT spawn TerminalSession objects here anymore. The restore picker
+      // (opened from onOpen) will materialize only user-selected sessions from
+      // saveData snapshots. We just stash metadata for migration fallback
+      // (pre-picker upgrade: snapshots missing but view state has sessions).
+      this._pendingLegacySessions = state.sessions.map((s: any) => ({
+        id: s.id,
+        name: s.name ?? `zsh ${s.id}`,
+        glyph: s.glyph ?? "",
+      }));
       this.nextId = state.nextId ?? 1;
 
-      for (const saved of state.sessions) {
-        const id = saved.id ?? this.nextId++;
-        if (id >= this.nextId) this.nextId = id + 1;
-        const vaultPath = (this.app.vault.adapter as any).basePath as string;
-        // Spawn into parking — renderLayout() will move them to panes
-        const session = new TerminalSession(this.parkingEl, id, vaultPath, this.app);
-        session.name = saved.name ?? `zsh ${id}`;
-        session.glyph = saved.glyph ?? "";
-        (session as any)._autoNameLocked = true;
-        this.addSessionToolbar(session);
-        this.sessions.push(session);
-        // Assign glyph if not persisted (migration from older state)
-        if (!session.glyph) this.assignGlyph(session);
-      }
-
-      // Restore layout if persisted, else default to single
+      // Restore layout immediately — picker respects it
       if (state.layout) {
         this.displayMode.layout = state.layout as FullscreenLayout;
         this.inlineLayout = state.layout as FullscreenLayout;
-      }
-
-      this.activeSession = this.sessions.find((s) => s.id === state.activeId) ?? this.sessions[0];
-      this.renderLayout();
-      this.renderTabs();
-
-      // Auto-resume: launch AI agent in all restored sessions.
-      // Round-robin: each terminal gets a different past session.
-      this.usedSessionIds.clear();
-      for (const session of this.sessions) {
-        const sessionId = this.getNextSessionId();
-        const cmd = this.buildAgentCmd(sessionId ?? undefined);
-        setTimeout(() => {
-          session.process.stdin?.write(cmd + "\r");
-        }, 500);
       }
     }
     return super.setState(state, result);
@@ -1230,8 +1264,9 @@ class TerminalView extends ItemView {
       })
     );
 
-    // Create first session (setState will replace this if restoring)
-    this.createSession();
+    // Smart restore picker: if saveData has snapshots, let user choose which
+    // to restore. Otherwise (first run / cleared data) create a default shell.
+    await this.handleRestoreFlow();
 
     // Sidebar timers — render only when dirty, poll every 5s
     this.sidebarTimerInterval = setInterval(() => {
@@ -1936,6 +1971,9 @@ class TerminalView extends ItemView {
 
     const session = this.createSession(skill.label);
     if (!session) return;
+    // Tag session with skill id so snapshot capture can attribute it even
+    // after tracker state resets (e.g., after to-review dismissed).
+    session.skillName = skill.id;
     // Override glyph with skill icon
     this.assignGlyph(session, skill.id);
     this.tracker?.track(session, skill.id);
@@ -2157,6 +2195,132 @@ class TerminalView extends ItemView {
 
   saveState() {
     this.app.workspace.requestSaveLayout();
+  }
+
+  // --- Smart restore flow ---
+
+  /** Called from onOpen after all UI containers are set up. Decides whether to
+   *  show the RestorePickerModal or just spawn a default shell. */
+  private async handleRestoreFlow() {
+    if (this._pickerHandled) {
+      this.createSession();
+      return;
+    }
+    this._pickerHandled = true;
+
+    const plugin = (this as any).plugin as TerminalPlugin | undefined;
+    if (!plugin?.loadSnapshots) {
+      this.createSession();
+      return;
+    }
+
+    const state = await plugin.loadSnapshots();
+    const hasSnapshots = state.snapshots.length > 0;
+    const hasLegacy = (this._pendingLegacySessions?.length ?? 0) > 0;
+
+    if (!hasSnapshots && !hasLegacy) {
+      // Truly fresh install or cleared data
+      this.createSession();
+      return;
+    }
+
+    if (!hasSnapshots && hasLegacy) {
+      // Pre-picker upgrade migration: view state has sessions but no snapshots.
+      // Spawn minimal restore (no agent auto-write — that's what the user
+      // wanted fixed anyway). Sessions are empty fresh PTYs.
+      for (const legacy of this._pendingLegacySessions!) {
+        if (legacy.id >= this.nextId) this.nextId = legacy.id + 1;
+        const vaultPath = (this.app.vault.adapter as any).basePath as string;
+        const session = new TerminalSession(this.parkingEl, legacy.id, vaultPath, this.app);
+        session.name = legacy.name;
+        session.glyph = legacy.glyph;
+        (session as any)._autoNameLocked = true;
+        this.addSessionToolbar(session);
+        this.sessions.push(session);
+        if (!session.glyph) this.assignGlyph(session);
+      }
+      this.activeSession = this.sessions[0] ?? null;
+      this.renderLayout();
+      this.renderTabs();
+      this._pendingLegacySessions = null;
+      return;
+    }
+
+    // Snapshots exist → show picker
+    let resolved = false;
+    const modal = new RestorePickerModal(this.app, state.snapshots, async (result) => {
+      resolved = true;
+      await this.applyPickerResult(state.snapshots, result);
+    });
+    // Wrap onClose to catch ESC/dismiss case (user bailed without deciding)
+    const origClose = modal.onClose.bind(modal);
+    modal.onClose = () => {
+      origClose();
+      setTimeout(() => {
+        if (!resolved && this.sessions.length === 0) {
+          // User dismissed picker — spawn a default shell so view isn't empty
+          this.createSession();
+        }
+      }, 150);
+    };
+    modal.open();
+  }
+
+  /** Execute picker decisions: materialize restored, archive skipped. */
+  private async applyPickerResult(allSnapshots: SessionSnapshot[], result: PickerResult) {
+    const plugin = (this as any).plugin as TerminalPlugin | undefined;
+
+    // Materialize selected snapshots as real sessions
+    for (const snap of allSnapshots) {
+      if (result.restoreIds.has(snap.id)) {
+        this.materializeFromSnapshot(snap);
+      }
+    }
+
+    // Update archived flags
+    if (plugin?.setSnapshotsArchived) {
+      const updates: Array<{ id: number; archived: boolean }> = [];
+      for (const snap of allSnapshots) {
+        updates.push({ id: snap.id, archived: result.archiveIds.has(snap.id) });
+      }
+      await plugin.setSnapshotsArchived(updates);
+    }
+
+    // If nothing was restored, give the user a default shell
+    if (this.sessions.length === 0) {
+      this.createSession();
+    } else {
+      this.activeSession = this.sessions[0];
+      this.renderLayout();
+      this.renderTabs();
+      this.renderSidebarCards();
+    }
+    this._pendingLegacySessions = null;
+  }
+
+  /** Create a fresh TerminalSession and write the snapshot's tail as a
+   *  read-only preamble. Does NOT re-run any skill command. */
+  private materializeFromSnapshot(snap: SessionSnapshot): TerminalSession | null {
+    try {
+      if (snap.id >= this.nextId) this.nextId = snap.id + 1;
+      const vaultPath = (this.app.vault.adapter as any).basePath as string;
+      const session = new TerminalSession(this.parkingEl, snap.id, vaultPath, this.app);
+      session.name = snap.name || `zsh ${snap.id}`;
+      session.glyph = snap.glyph;
+      session.skillName = snap.skillName ?? null;
+      (session as any)._autoNameLocked = true;
+      this.addSessionToolbar(session);
+      this.sessions.push(session);
+      if (!session.glyph) this.assignGlyph(session);
+      // Replay tail once PTY is ready enough to render (~150ms)
+      setTimeout(() => {
+        session.replayTail(snap.bufferTail);
+      }, 150);
+      return session;
+    } catch (e) {
+      console.error("[mc] materializeFromSnapshot failed:", e);
+      return null;
+    }
   }
 
   switchTo(session: TerminalSession) {
@@ -2480,6 +2644,13 @@ class TerminalView extends ItemView {
   }
 
   async onClose() {
+    // Capture snapshots before destroying PTYs so next reopen can show picker.
+    const plugin = (this as any).plugin as TerminalPlugin | undefined;
+    if (plugin?.persistSnapshots) {
+      try { await plugin.persistSnapshots(this.sessions, this.tracker); } catch (e) {
+        console.error("[mc] persistSnapshots on close failed:", e);
+      }
+    }
     if (this.sidebarTimerInterval) clearInterval(this.sidebarTimerInterval);
     if (this.sidebarPollInterval) clearInterval(this.sidebarPollInterval);
     this.fullscreenManager?.destroy();
@@ -2522,6 +2693,264 @@ class ShortcutsModal extends Modal {
       text: "Open, fullscreen, and tab commands have no default hotkeys. Assign them in Settings > Hotkeys.",
       cls: "mc-shortcuts-hint",
     });
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
+// --- RestorePickerModal ---
+//
+// Shown on plugin open when saveData contains SessionSnapshots from a prior
+// run. Classifies each snapshot into Attention / Idle / Archive buckets based
+// on agent state + recency + buffer tail heuristics, and lets the user pick
+// which ones to restore. Unselected sessions are marked archived (kept for
+// future picker openings) — never silently deleted.
+
+type RestoreBucket = "attention" | "idle" | "archive";
+
+interface ClassifiedSnapshot {
+  snap: SessionSnapshot;
+  bucket: RestoreBucket;
+  reason: string;
+  score: number;
+}
+
+function hasClaudeTuiMarkers(lines: string[]): boolean {
+  for (const line of lines) {
+    if (/^[╭╰│]/.test(line)) return true;
+    if (/^❯\s/.test(line) || /^❯\s*$/.test(line)) return true;
+    if (/✻\s/.test(line)) return true;
+    if (/Welcome to Claude/.test(line)) return true;
+  }
+  return false;
+}
+
+function classifySnapshot(s: SessionSnapshot): ClassifiedSnapshot {
+  const now = Date.now();
+  if (s.archived) {
+    return { snap: s, bucket: "archive", reason: "Previously skipped", score: 0 };
+  }
+  if (s.agentStatus === "working") {
+    return { snap: s, bucket: "attention", reason: "Agent was working", score: 100 };
+  }
+  if (s.agentStatus === "to-review") {
+    return { snap: s, bucket: "attention", reason: "Awaiting your review", score: 90 };
+  }
+  const recentLines = s.bufferTail.slice(-8);
+  if (hasClaudeTuiMarkers(recentLines)) {
+    return { snap: s, bucket: "attention", reason: "Claude session active", score: 70 };
+  }
+  const ageMs = now - (s.lastActivityAt || 0);
+  if (ageMs < 30 * 60 * 1000) {
+    return { snap: s, bucket: "attention", reason: "Recent activity", score: 50 };
+  }
+  return { snap: s, bucket: "idle", reason: "Clean prompt", score: 0 };
+}
+
+function formatRelativeTime(epochMs: number): string {
+  if (!epochMs) return "unknown";
+  const diff = Date.now() - epochMs;
+  if (diff < 60_000) return "just now";
+  if (diff < 3600_000) return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3600_000)}h ago`;
+  return `${Math.floor(diff / 86_400_000)}d ago`;
+}
+
+interface PickerResult {
+  restoreIds: Set<number>;
+  archiveIds: Set<number>;
+}
+
+class RestorePickerModal extends Modal {
+  private snapshots: SessionSnapshot[];
+  private onResolve: (r: PickerResult) => void;
+  private selected: Set<number> = new Set();
+  private archiveExpanded = false;
+
+  constructor(app: App, snapshots: SessionSnapshot[], onResolve: (r: PickerResult) => void) {
+    super(app);
+    this.snapshots = snapshots;
+    this.onResolve = onResolve;
+    // Default: pre-check attention bucket
+    for (const s of snapshots) {
+      const c = classifySnapshot(s);
+      if (c.bucket === "attention") this.selected.add(s.id);
+    }
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.addClass("mc-restore-picker-modal");
+
+    // --- Header ---
+    const header = contentEl.createDiv({ cls: "mc-restore-header" });
+    header.createEl("h2", { text: "Welcome back" });
+    const nonArchived = this.snapshots.filter((s) => !s.archived).length;
+    const archivedCount = this.snapshots.length - nonArchived;
+    const sub = nonArchived === 0
+      ? `No active sessions. ${archivedCount} archived.`
+      : `${nonArchived} previous session${nonArchived === 1 ? "" : "s"}. Pick what to continue.`;
+    header.createEl("p", { text: sub, cls: "mc-restore-subtitle" });
+
+    // --- Classify + group ---
+    const classified = this.snapshots.map(classifySnapshot);
+    const attention = classified
+      .filter((c) => c.bucket === "attention")
+      .sort((a, b) => b.score - a.score || b.snap.lastActivityAt - a.snap.lastActivityAt);
+    const idle = classified
+      .filter((c) => c.bucket === "idle")
+      .sort((a, b) => b.snap.lastActivityAt - a.snap.lastActivityAt);
+    const archive = classified
+      .filter((c) => c.bucket === "archive")
+      .sort((a, b) => b.snap.lastActivityAt - a.snap.lastActivityAt);
+
+    // --- Render buckets ---
+    if (attention.length > 0) {
+      this.renderBucket(contentEl, "Needs attention", attention, true, "attention");
+    }
+    if (idle.length > 0) {
+      this.renderBucket(contentEl, "Idle", idle, true, "idle");
+    }
+    if (archive.length > 0) {
+      this.renderBucket(contentEl, `Archive (${archive.length})`, archive, false, "archive");
+    }
+
+    if (this.snapshots.length === 0) {
+      contentEl.createEl("p", {
+        text: "No previous sessions. This modal shouldn't appear — opening a fresh shell.",
+        cls: "mc-restore-empty",
+      });
+    }
+
+    // --- Action buttons ---
+    const actions = contentEl.createDiv({ cls: "mc-restore-actions" });
+    const skipBtn = actions.createEl("button", {
+      text: "Skip all",
+      cls: "mc-restore-btn mc-restore-btn-secondary",
+    });
+    skipBtn.addEventListener("click", () => {
+      // Nothing selected → archive everything (non-archived); keep archive as-is
+      this.confirm();
+    });
+
+    const restoreBtn = actions.createEl("button", {
+      text: "Restore selected",
+      cls: "mc-restore-btn mc-restore-btn-primary",
+    });
+    restoreBtn.addEventListener("click", () => {
+      this.confirm();
+    });
+  }
+
+  private renderBucket(
+    parent: HTMLElement,
+    title: string,
+    items: ClassifiedSnapshot[],
+    expandedDefault: boolean,
+    kind: RestoreBucket,
+  ) {
+    const section = parent.createDiv({ cls: `mc-restore-bucket mc-restore-bucket-${kind}` });
+    const headerEl = section.createDiv({ cls: "mc-restore-bucket-header" });
+    const chevron = headerEl.createSpan({ cls: "mc-restore-chevron" });
+    chevron.textContent = expandedDefault ? "▾" : "▸";
+    headerEl.createSpan({ cls: "mc-restore-bucket-title", text: title });
+    headerEl.createSpan({ cls: "mc-restore-bucket-count", text: `${items.length}` });
+
+    const body = section.createDiv({ cls: "mc-restore-bucket-body" });
+    if (!expandedDefault) body.style.display = "none";
+
+    headerEl.addEventListener("click", () => {
+      const isHidden = body.style.display === "none";
+      body.style.display = isHidden ? "" : "none";
+      chevron.textContent = isHidden ? "▾" : "▸";
+      if (kind === "archive") this.archiveExpanded = isHidden;
+    });
+
+    for (const c of items) {
+      this.renderSnapshotRow(body, c);
+    }
+  }
+
+  private renderSnapshotRow(parent: HTMLElement, c: ClassifiedSnapshot) {
+    const row = parent.createDiv({ cls: "mc-restore-row" });
+    if (this.selected.has(c.snap.id)) row.addClass("is-selected");
+
+    // Checkbox
+    const checkbox = row.createEl("input", { type: "checkbox" });
+    checkbox.checked = this.selected.has(c.snap.id);
+    checkbox.addClass("mc-restore-checkbox");
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) this.selected.add(c.snap.id);
+      else this.selected.delete(c.snap.id);
+      row.toggleClass("is-selected", checkbox.checked);
+    });
+
+    // Content column
+    const content = row.createDiv({ cls: "mc-restore-row-content" });
+
+    // Top line: glyph + name + reason badge + time
+    const topLine = content.createDiv({ cls: "mc-restore-row-top" });
+    const glyphEl = topLine.createSpan({ cls: "mc-restore-glyph" });
+    glyphEl.textContent = this.renderGlyphChar(c.snap.glyph);
+    topLine.createSpan({ cls: "mc-restore-name", text: c.snap.name || `zsh ${c.snap.id}` });
+    if (c.snap.skillName && c.snap.skillName !== c.snap.name) {
+      topLine.createSpan({ cls: "mc-restore-skill", text: `/${c.snap.skillName}` });
+    }
+    const badge = topLine.createSpan({ cls: `mc-restore-badge mc-restore-badge-${c.bucket}` });
+    badge.textContent = c.reason;
+    topLine.createSpan({
+      cls: "mc-restore-time",
+      text: formatRelativeTime(c.snap.lastActivityAt),
+    });
+
+    // Preview: last few tail lines
+    const tail = c.snap.bufferTail.slice(-4);
+    if (tail.length > 0) {
+      const preview = content.createDiv({ cls: "mc-restore-preview" });
+      for (const line of tail) {
+        const truncated = line.length > 120 ? line.slice(0, 117) + "…" : line;
+        preview.createDiv({ cls: "mc-restore-preview-line", text: truncated });
+      }
+    }
+
+    // Whole row clickable toggles checkbox
+    row.addEventListener("click", (e) => {
+      if ((e.target as HTMLElement).tagName === "INPUT") return;
+      checkbox.checked = !checkbox.checked;
+      checkbox.dispatchEvent(new Event("change"));
+    });
+  }
+
+  /** Glyph-to-unicode mapping for picker preview. Falls back to • */
+  private renderGlyphChar(glyph: string): string {
+    const map: Record<string, string> = {
+      "circle": "●",
+      "ring": "○",
+      "square": "■",
+      "square-outline": "□",
+      "triangle": "▲",
+      "triangle-outline": "△",
+      "diamond": "◆",
+      "diamond-outline": "◇",
+      "hex": "⬢",
+      "hex-outline": "⬡",
+      "star": "★",
+      "cross": "✕",
+    };
+    return map[glyph] || "•";
+  }
+
+  private confirm() {
+    const restoreIds = new Set(this.selected);
+    const archiveIds = new Set<number>();
+    for (const s of this.snapshots) {
+      if (!restoreIds.has(s.id)) archiveIds.add(s.id);
+    }
+    this.onResolve({ restoreIds, archiveIds });
+    this.close();
   }
 
   onClose() {
@@ -2642,6 +3071,7 @@ class OnboardingModal extends Modal {
               gwPill.textContent = "Connected";
               gwPill.classList.remove("is-disconnected", "is-error");
               gwPill.classList.add("is-connected");
+              void gwPlugin.syncMcpOnConnect(state.tokens.accountEmail);
             } else if (state.kind === "error") {
               gwPill.textContent = "Error";
               gwPill.classList.remove("is-disconnected", "is-connected");
@@ -2650,6 +3080,8 @@ class OnboardingModal extends Modal {
               gwPill.textContent = "Disconnected";
               gwPill.classList.remove("is-connected", "is-error");
               gwPill.classList.add("is-disconnected");
+              // Onboarding modal disconnect = disconnect all accounts
+              void gwPlugin.syncMcpOnDisconnect();
             }
           },
         }).open();
@@ -3133,17 +3565,20 @@ interface SkillDef {
 }
 
 const SKILLS: SkillDef[] = [
-  { id: "start-here", label: "Start Here", description: "Onboarding agent — scan vault, build modular-context structure", primary: true },
-  { id: "process-transcripts", label: "Ingest Data", description: "Process new sources — categorize, extract insights, update wiki modules", primary: true },
-  { id: "pulse", label: "Pulse", description: "Vault health check — staleness radar, strategic questions, next steps", primary: true },
-  { id: "brief", label: "Brief", description: "Generate PDF brief or one-pager from vault knowledge", primary: true },
+  // Primary — 3 daily drivers (pre-checked in onboarding + full-width in sidebar)
+  { id: "process-transcripts", label: "Synthesise Files", description: "Synthesise raw files (transcripts, notes, backlog) into vault modules", primary: true },
+  { id: "whatsapp-digest", label: "WhatsApp Digest", description: "Analyze WhatsApp groups — action items, blindspots, vault staleness", primary: true },
+  { id: "gsuite-analysis", label: "Gmail + Calendar", description: "Inbox sweep, stale follow-ups, calendar gap analysis, meeting prep (via MCP tools)", primary: true },
+  // Secondary — available but not pre-checked
+  { id: "start-here", label: "Start Here", description: "Onboarding agent — scan vault, build modular-context structure" },
+  { id: "pulse", label: "Pulse", description: "Vault health check — staleness radar, strategic questions, next steps" },
+  { id: "brief", label: "Brief", description: "Generate PDF brief or one-pager from vault knowledge" },
   { id: "log", label: "Log", description: "Close session — generate session log, commit changes" },
   { id: "ideas", label: "Ideas", description: "Generate new ideas from vault context using creative triggers" },
   { id: "reweave", label: "Reweave", description: "Cascade-update stale or disconnected modules" },
   { id: "vault-audit", label: "Vault Audit", description: "Audit vault structure — broken links, orphans, naming issues" },
   { id: "graph", label: "Graph", description: "Analyze knowledge graph — clusters, bridges, dependency depth" },
   { id: "graduate", label: "Graduate", description: "Promote buried transcript insights into standalone modules" },
-  { id: "whatsapp-digest", label: "WhatsApp Digest", description: "Analyze WhatsApp groups — action items, blindspots, vault staleness" },
 ];
 
 
@@ -3478,6 +3913,61 @@ export default class TerminalPlugin extends Plugin {
     return this.googleStorage;
   }
 
+  getMcpSyncOptions() {
+    const vaultRoot = (this.app.vault.adapter as any).basePath as string;
+    const path = require("path");
+    const sourceServerPath = path.join(vaultRoot, this.manifest.dir, "mcp-server.js");
+    const config = this.getGoogleOAuthConfig();
+    return {
+      vaultRoot,
+      sourceServerPath,
+      clientId: config.clientId,
+      clientSecret: config.clientSecret,
+      pluginVersion: this.manifest.version,
+    };
+  }
+
+  /**
+   * Sync MCP after a successful connect. If accountId omitted, reads primary
+   * account's tokens (legacy single-account flow).
+   */
+  async syncMcpOnConnect(accountId?: string): Promise<void> {
+    const { syncOnConnect } = await import("./src/google/mcp-config/mcp-sync");
+    const storage = this.getGoogleStorage() as any;
+    const multi = typeof storage.getMulti === "function" ? storage.getMulti() : null;
+
+    let tokens = null;
+    if (accountId && multi) {
+      tokens = await multi.loadTokens(accountId).catch(() => null);
+    } else {
+      tokens = await storage.loadTokens().catch(() => null);
+    }
+    if (!tokens) return;
+    const result = syncOnConnect(tokens, this.getMcpSyncOptions());
+    if (result.message) new Notice(`Modular Context: ${result.message}`);
+    if (!result.ok) console.error("[mc] MCP sync failed:", result.error);
+  }
+
+  /**
+   * Sync MCP after a disconnect. accountId required for specific account removal.
+   * If omitted, disconnects ALL accounts (full cleanup).
+   */
+  async syncMcpOnDisconnect(accountId?: string): Promise<void> {
+    if (accountId) {
+      const { syncOnDisconnect } = await import("./src/google/mcp-config/mcp-sync");
+      const result = syncOnDisconnect(accountId, {
+        vaultRoot: this.getMcpSyncOptions().vaultRoot,
+      });
+      if (result.message) new Notice(`Modular Context: ${result.message}`);
+      if (!result.ok) console.error("[mc] MCP disconnect cleanup failed:", result.error);
+    } else {
+      const { syncDisconnectAll } = await import("./src/google/mcp-config/mcp-sync");
+      const result = syncDisconnectAll({ vaultRoot: this.getMcpSyncOptions().vaultRoot });
+      if (result.message) new Notice(`Modular Context: ${result.message}`);
+      if (!result.ok) console.error("[mc] MCP disconnect-all failed:", result.error);
+    }
+  }
+
   async onload() {
     // Ensure pty-helper.py exists in the plugin directory.
     // BRAT and Obsidian's plugin installer only copy main.js, manifest.json,
@@ -3641,31 +4131,59 @@ export default class TerminalPlugin extends Plugin {
           clientId: process.env.GOOGLE_OAUTH_CLIENT_ID || "",
           clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET || "",
         },
+        onStateChange: (state) => {
+          if (state.kind === "connected") {
+            void this.syncMcpOnConnect(state.tokens.accountEmail);
+          } else if (state.kind === "disconnected") {
+            void this.syncMcpOnDisconnect();
+          }
+        },
       }).open();
     };
 
     this.addCommand({
       id: "google-workspace-connect",
-      name: "Google Workspace: Connect",
+      name: "Google Workspace: Connect (or add account)",
+      callback: openConnectGoogle,
+    });
+
+    this.addCommand({
+      id: "google-workspace-add-account",
+      name: "Google Workspace: Add another account",
       callback: openConnectGoogle,
     });
 
     this.addCommand({
       id: "google-workspace-disconnect",
-      name: "Google Workspace: Disconnect",
+      name: "Google Workspace: Disconnect all accounts",
       callback: async () => {
-        await this.getGoogleStorage().clearTokens().catch((e: unknown) => {
-          console.error("[mc] Google disconnect failed:", e);
-        });
-        new Notice("Google Workspace disconnected");
+        const storage = this.getGoogleStorage() as any;
+        const multi = typeof storage.getMulti === "function" ? storage.getMulti() : null;
+        if (multi) {
+          const accounts = await multi.listAccounts();
+          for (const a of accounts) await multi.removeAccount(a.id).catch(() => undefined);
+        } else {
+          await this.getGoogleStorage().clearTokens().catch(() => undefined);
+        }
+        await this.syncMcpOnDisconnect();
+        new Notice("All Google Workspace accounts disconnected");
       },
     });
 
     this.addCommand({
       id: "google-workspace-reconnect",
-      name: "Google Workspace: Reconnect",
+      name: "Google Workspace: Reconnect (upgrade scopes)",
       callback: async () => {
-        await this.getGoogleStorage().clearTokens().catch(() => undefined);
+        const storage = this.getGoogleStorage() as any;
+        const multi = typeof storage.getMulti === "function" ? storage.getMulti() : null;
+        if (multi) {
+          // Remove all accounts and re-open modal — user reconnects each
+          const accounts = await multi.listAccounts();
+          for (const a of accounts) await multi.removeAccount(a.id).catch(() => undefined);
+          await this.syncMcpOnDisconnect();
+        } else {
+          await this.getGoogleStorage().clearTokens().catch(() => undefined);
+        }
         openConnectGoogle();
       },
     });
@@ -3674,39 +4192,88 @@ export default class TerminalPlugin extends Plugin {
       id: "google-workspace-status",
       name: "Google Workspace: Status",
       callback: async () => {
-        const tokens = await this.getGoogleStorage().loadTokens().catch(() => null);
-        if (!tokens) {
+        const storage = this.getGoogleStorage() as any;
+        const multi = typeof storage.getMulti === "function" ? storage.getMulti() : null;
+        if (!multi) {
           new Notice("Google Workspace: not connected");
           return;
         }
-        const remainingMin = Math.max(0, Math.floor((tokens.expiresAt - Date.now()) / 60000));
-        new Notice(`Google Workspace: connected as ${tokens.accountEmail} (expires in ~${remainingMin} min)`);
+        const accounts = await multi.listAccounts();
+        if (accounts.length === 0) {
+          new Notice("Google Workspace: no accounts connected");
+          return;
+        }
+        const { computeMissingScopes } = await import("@mc/shared");
+        const lines: string[] = [`Google Workspace: ${accounts.length} account(s)`];
+        for (const a of accounts) {
+          const tokens = await multi.loadTokens(a.id).catch(() => null);
+          const remainingMin = tokens
+            ? Math.max(0, Math.floor((tokens.expiresAt - Date.now()) / 60000))
+            : 0;
+          const missing = computeMissingScopes(a.scope);
+          const scopeStatus = missing.length === 0 ? "ok" : `needs reconnect (missing ${missing.length} scopes)`;
+          const primary = a.isPrimary ? " [primary]" : "";
+          lines.push(`  • ${a.email}${primary} — expires ~${remainingMin}min, scopes: ${scopeStatus}`);
+        }
+        new Notice(lines.join("\n"), 15_000);
       },
     });
 
-    // Start Google token refresh timer (no-op if not connected)
-    this.googleRefreshTimer = startRefreshTimer({
-      storage: this.getGoogleStorage(),
-      config: this.getGoogleOAuthConfig(),
+    this.addCommand({
+      id: "google-workspace-show-logs",
+      name: "Google Workspace: Show MCP server logs",
+      callback: () => {
+        const path = require("path");
+        const os = require("os");
+        const fs = require("fs");
+        const logPath = path.join(os.homedir(), ".modular-context", "mcp-google", "logs", "server.log");
+        if (!fs.existsSync(logPath)) {
+          new Notice("No MCP logs yet. Server runs when Claude Code calls a tool.");
+          return;
+        }
+        const { shell } = require("electron");
+        shell.openPath(logPath).catch(() => undefined);
+      },
     });
 
-    // Startup refresh check — if tokens expired, attempt refresh once immediately
-    void this.getGoogleStorage().loadTokens().then(async (tokens: StoredTokens | null) => {
-      if (!tokens) return;
-      if (tokens.expiresAt < Date.now()) {
-        // Tokens expired — refresh timer will attempt on next tick, but try now too
-        const { getValidAccessToken } = await import("./src/google/tokens/refresh");
-        const valid = await getValidAccessToken({
-          storage: this.getGoogleStorage(),
-          config: this.getGoogleOAuthConfig(),
-        }).catch(() => null);
-        if (!valid) {
-          new Notice("Google Workspace session expired. Run 'Google Workspace: Reconnect' to refresh.");
+    // Start Google multi-account refresh timer. Refreshes ALL connected accounts
+    // and re-syncs sidecar per account on success.
+    void (async () => {
+      const { startMultiRefreshTimer } = await import("./src/google/tokens/refresh");
+      const storage = this.getGoogleStorage() as any;
+      const multi = typeof storage.getMulti === "function" ? storage.getMulti() : null;
+      if (!multi) return;
+      this.googleRefreshTimer = startMultiRefreshTimer({
+        multiStorage: multi,
+        config: this.getGoogleOAuthConfig(),
+        onTokensUpdated: async (accountId, tokens) => {
+          const { syncOnRefresh } = await import("./src/google/mcp-config/mcp-sync");
+          const result = syncOnRefresh(accountId, tokens, this.getMcpSyncOptions());
+          if (!result.ok) console.error("[mc] MCP sidecar refresh sync failed:", result.error);
+        },
+      });
+    })();
+
+    // Startup scope coverage check — warn user if any account has outdated scopes.
+    void (async () => {
+      try {
+        const { findAccountsNeedingReconnect } = await import("./src/google/tokens/refresh");
+        const storage = this.getGoogleStorage() as any;
+        const multi = typeof storage.getMulti === "function" ? storage.getMulti() : null;
+        if (!multi) return;
+        const needing = await findAccountsNeedingReconnect(multi);
+        if (needing.length > 0) {
+          const emails = needing.map((n: { email: string }) => n.email).join(", ");
+          new Notice(
+            `Google Workspace: OAuth scopes upgraded. Reconnect required for: ${emails}. ` +
+              `Run "Google Workspace: Reconnect" command.`,
+            15_000,
+          );
         }
+      } catch (e) {
+        console.warn("[mc] Scope coverage check failed:", e);
       }
-    }).catch(() => {
-      // Corrupted/missing tokens — let modal handle on user open
-    });
+    })();
 
     // Ensure terminal leaf exists in the right sidebar on startup
     this.app.workspace.onLayoutReady(async () => {
@@ -3771,9 +4338,78 @@ export default class TerminalPlugin extends Plugin {
   }
 
   async onunload() {
+    // Capture snapshots of any live sessions before detaching leaves.
+    // detachLeavesOfType would destroy them and lose tail buffers.
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
+      const view = leaf.view as TerminalView;
+      try {
+        await this.persistSnapshots(view.sessions ?? [], view.tracker ?? null);
+      } catch (e) {
+        console.error("[mc] persistSnapshots on unload failed:", e);
+      }
+    }
     this.agentTracker.stop();
     this.googleRefreshTimer?.cancel();
     this.googleRefreshTimer = null;
     this.app.workspace.detachLeavesOfType(VIEW_TYPE);
+  }
+
+  // --- Session snapshot persistence (smart restore picker) ---
+
+  /** Persist snapshots of all live sessions to plugin saveData.
+   *  Merges with existing archived snapshots so user's "skipped" history
+   *  is preserved across restarts. */
+  async persistSnapshots(sessions: TerminalSession[], tracker: AgentTracker | null) {
+    const data = (await this.loadData()) ?? {};
+    const prev: RestoreState = data.restoreState ?? emptyRestoreState();
+    // Keep existing archived snapshots (user marked them "don't restore")
+    const archived = prev.snapshots.filter((s) => s.archived);
+    // Capture fresh snapshots for live sessions
+    const fresh: SessionSnapshot[] = [];
+    for (const session of sessions) {
+      try {
+        fresh.push(session.captureSnapshot(tracker));
+      } catch (e) {
+        console.warn(`[mc] captureSnapshot failed for session ${session.id}:`, e);
+      }
+    }
+    // Deduplicate: if a live session's id matches an archived one, live wins
+    const freshIds = new Set(fresh.map((s) => s.id));
+    const merged = [...fresh, ...archived.filter((s) => !freshIds.has(s.id))];
+    const nextState: RestoreState = {
+      version: RESTORE_STATE_VERSION,
+      snapshots: merged,
+    };
+    await this.saveData({ ...data, restoreState: nextState });
+  }
+
+  /** Load snapshots from plugin saveData. Returns empty state if none exist. */
+  async loadSnapshots(): Promise<RestoreState> {
+    const data = (await this.loadData()) ?? {};
+    const raw = data.restoreState;
+    if (!raw || raw.version !== RESTORE_STATE_VERSION || !Array.isArray(raw.snapshots)) {
+      return emptyRestoreState();
+    }
+    return raw as RestoreState;
+  }
+
+  /** Update snapshot archived flag for a set of ids. Used by picker "Skip". */
+  async setSnapshotsArchived(updates: Array<{ id: number; archived: boolean }>) {
+    const data = (await this.loadData()) ?? {};
+    const state: RestoreState = data.restoreState ?? emptyRestoreState();
+    const byId = new Map(updates.map((u) => [u.id, u.archived]));
+    state.snapshots = state.snapshots.map((s) =>
+      byId.has(s.id) ? { ...s, archived: byId.get(s.id)! } : s,
+    );
+    await this.saveData({ ...data, restoreState: state });
+  }
+
+  /** Remove snapshots matching given ids. Used when picker materializes them. */
+  async removeSnapshots(ids: number[]) {
+    const data = (await this.loadData()) ?? {};
+    const state: RestoreState = data.restoreState ?? emptyRestoreState();
+    const toRemove = new Set(ids);
+    state.snapshots = state.snapshots.filter((s) => !toRemove.has(s.id));
+    await this.saveData({ ...data, restoreState: state });
   }
 }

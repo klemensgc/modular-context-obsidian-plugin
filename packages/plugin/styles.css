@@ -2814,3 +2814,238 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
   background: rgba(220, 38, 38, 0.15);
   color: #dc2626;
 }
+
+/* --- RestorePickerModal --- */
+
+.mc-restore-picker-modal {
+  font-family: var(--font-interface);
+  min-width: 560px;
+  max-width: 680px;
+}
+
+.mc-restore-header {
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.mc-restore-header h2 {
+  margin: 0 0 4px;
+  font-size: 18px;
+  font-weight: 650;
+  color: var(--text-normal);
+}
+
+.mc-restore-subtitle {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.mc-restore-bucket {
+  margin-bottom: 14px;
+}
+
+.mc-restore-bucket-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  cursor: pointer;
+  user-select: none;
+  border-radius: 4px;
+  transition: background 120ms ease;
+}
+
+.mc-restore-bucket-header:hover {
+  background: var(--background-modifier-hover);
+}
+
+.mc-restore-chevron {
+  font-size: 11px;
+  color: var(--text-muted);
+  width: 12px;
+  display: inline-block;
+}
+
+.mc-restore-bucket-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-normal);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.mc-restore-bucket-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: auto;
+  padding: 1px 6px;
+  background: var(--background-modifier-border);
+  border-radius: 10px;
+}
+
+.mc-restore-bucket-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 0 2px;
+}
+
+.mc-restore-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--background-secondary);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.mc-restore-row:hover {
+  background: var(--background-modifier-hover);
+}
+
+.mc-restore-row.is-selected {
+  background: var(--background-modifier-hover);
+  border-color: var(--interactive-accent);
+}
+
+.mc-restore-checkbox {
+  margin: 3px 0 0;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.mc-restore-row-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.mc-restore-row-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.mc-restore-glyph {
+  font-size: 14px;
+  color: var(--text-accent);
+  width: 16px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.mc-restore-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.mc-restore-skill {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  font-family: var(--font-monospace);
+}
+
+.mc-restore-badge {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.mc-restore-badge-attention {
+  background: rgba(235, 103, 15, 0.15);
+  color: #eb670f;
+}
+
+.mc-restore-badge-idle {
+  background: var(--background-modifier-border);
+  color: var(--text-muted);
+}
+
+.mc-restore-badge-archive {
+  background: transparent;
+  color: var(--text-faint);
+  border: 1px solid var(--background-modifier-border);
+}
+
+.mc-restore-time {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.mc-restore-preview {
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--background-primary);
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin-top: 4px;
+  max-height: 72px;
+  overflow: hidden;
+}
+
+.mc-restore-preview-line {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.5;
+}
+
+.mc-restore-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.mc-restore-btn {
+  padding: 7px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  border-radius: 5px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 120ms ease;
+}
+
+.mc-restore-btn-secondary {
+  background: transparent;
+  border-color: var(--background-modifier-border);
+  color: var(--text-muted);
+}
+
+.mc-restore-btn-secondary:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.mc-restore-btn-primary {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.mc-restore-btn-primary:hover {
+  background: var(--interactive-accent-hover);
+}
+
+.mc-restore-empty {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  padding: 20px 0;
+}

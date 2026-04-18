@@ -19,7 +19,9 @@ if (existsSync(envLocalPath)) {
   }
 }
 
-esbuild.build({
+import { copyFileSync } from "node:fs";
+
+await esbuild.build({
   entryPoints: ["main.ts"],
   bundle: true,
   outfile: "main.js",
@@ -36,3 +38,16 @@ esbuild.build({
     "process.env.GOOGLE_OAUTH_CLIENT_SECRET": JSON.stringify(envVars.GOOGLE_OAUTH_CLIENT_SECRET),
   },
 }).catch(() => process.exit(1));
+
+// Copy MCP Google server binary to plugin folder so it ships alongside main.js/styles.css.
+// User's copy-to-vault flow: cp main.js styles.css manifest.json mcp-server.js <plugin-dir>/
+const mcpDist = resolvePath("../mcp-google/dist/index.js");
+if (existsSync(mcpDist)) {
+  copyFileSync(mcpDist, "mcp-server.js");
+  console.log("[build] Copied mcp-google dist → mcp-server.js");
+} else {
+  console.warn(
+    "[build] WARNING: ../mcp-google/dist/index.js missing. " +
+      "Run 'npm run build' in packages/mcp-google first, or Google Workspace MCP features will not work.",
+  );
+}
