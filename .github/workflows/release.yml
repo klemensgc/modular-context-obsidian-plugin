@@ -23,8 +23,15 @@ jobs:
 
             - run: npm ci
 
-            - name: Build plugin
+            - name: Build all packages (builds mcp-google first, then plugin copies mcp-server.js)
               run: npm run build
+
+            - name: Verify release artifacts present
+              run: |
+                  ls -lh packages/plugin/main.js
+                  ls -lh packages/plugin/manifest.json
+                  ls -lh packages/plugin/styles.css
+                  ls -lh packages/plugin/mcp-server.js
 
             - name: Create release
               env:
@@ -32,7 +39,16 @@ jobs:
               run: |
                   tag="${GITHUB_REF#refs/tags/}"
 
+                  # Prefer RELEASE-v{tag}.md notes if present, fallback to auto-generated
+                  notes_flag="--generate-notes"
+                  if [ -f "packages/plugin/RELEASE-v${tag}.md" ]; then
+                    notes_flag="--notes-file packages/plugin/RELEASE-v${tag}.md"
+                  fi
+
                   gh release create "$tag" \
                     --title="v$tag" \
-                    --generate-notes \
-                    main.js manifest.json styles.css
+                    $notes_flag \
+                    packages/plugin/main.js \
+                    packages/plugin/manifest.json \
+                    packages/plugin/styles.css \
+                    packages/plugin/mcp-server.js

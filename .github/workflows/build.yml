@@ -2,9 +2,9 @@ name: Build Check
 
 on:
     push:
-        branches: [main]
+        branches: [master]
     pull_request:
-        branches: [main]
+        branches: [master]
 
 jobs:
     build:
@@ -21,8 +21,14 @@ jobs:
 
             - run: npm ci
 
-            - name: Build plugin
+            - name: Build all packages
               run: npm run build
 
-            - name: Type check
-              run: npx tsc --noEmit
+            - name: Type check — shared
+              run: cd packages/shared && npx tsc --noEmit
+
+            - name: Type check — plugin
+              run: cd packages/plugin && npx tsc --noEmit
+
+            - name: Type check — mcp-google
+              run: cd packages/mcp-google && NODE_OPTIONS='--max-old-space-size=8192' npx tsc --noEmit
