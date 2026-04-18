@@ -1,0 +1,22 @@
+{
+  "name": "modular-context",
+  "version": "1.5.0-beta",
+  "private": true,
+  "scripts": {
+    "build": "node esbuild.config.mjs",
+    "version": "node version-bump.mjs && git add manifest.json versions.json"
+  },
+  "dependencies": {
+    "@mc/shared": "*",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
+    "google-auth-library": "^10.6.2",
+    "googleapis": "^171.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "esbuild": "^0.25.0",
+    "obsidian": "latest",
+    "typescript": "^5.4.0"
+  }
+}

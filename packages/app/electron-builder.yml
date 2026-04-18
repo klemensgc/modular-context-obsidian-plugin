@@ -1,0 +1,20 @@
+appId: com.modularcontext.app
+productName: Modular Context
+directories:
+  output: dist-app
+files:
+  - dist/**/*
+  - package.json
+  - assets/icon.icns
+asar: true
+npmRebuild: false
+buildDependenciesFromSource: false
+nodeGypRebuild: false
+mac:
+  target:
+    - dmg
+  category: public.app-category.productivity
+  darkModeSupport: true
+  minimumSystemVersion: "11.0"
+  identity: null
+  icon: assets/icon.icns

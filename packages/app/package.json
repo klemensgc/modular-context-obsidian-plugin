@@ -1,0 +1,38 @@
+{
+  "name": "@mc/app",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Modular Context — standalone macOS app (Electron + CodeMirror 6)",
+  "author": "Klemens Gasienica-Ciulacz <klemens@receptionos.com>",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "build:main": "esbuild src/main/index.ts --bundle --platform=node --target=node18 --format=cjs --external:electron --external:chokidar --loader:.py=text --outfile=dist/main/index.js",
+    "build:preload": "esbuild src/preload/preload.ts --bundle --platform=node --target=node18 --format=cjs --external:electron --outfile=dist/preload/preload.js",
+    "build:renderer": "esbuild src/renderer/index.ts --bundle --platform=browser --target=es2020 --format=iife --loader:.css=text --loader:.py=text --external:child_process --external:fs --external:path --outfile=dist/renderer/index.js && cp src/renderer/index.html dist/renderer/index.html",
+    "build:css": "cat ../shared/styles.css src/renderer/styles.css > dist/renderer/styles.css",
+    "build": "mkdir -p dist/main dist/preload dist/renderer && npm run build:main && npm run build:preload && npm run build:renderer && npm run build:css",
+    "dev": "npm run build && electron .",
+    "dist": "npm run build && electron-builder --mac --publish never"
+  },
+  "dependencies": {
+    "@codemirror/commands": "^6.10.3",
+    "@codemirror/lang-markdown": "^6.5.0",
+    "@codemirror/language": "^6.12.3",
+    "@codemirror/state": "^6.6.0",
+    "@codemirror/theme-one-dark": "^6.1.0",
+    "@codemirror/view": "^6.41.0",
+    "@mc/shared": "*",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
+    "chokidar": "^3.6.0",
+    "electron-store": "^8.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "7zip-bin": "^5.2.0",
+    "electron": "30.5.1",
+    "electron-builder": "^24.0.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.4.0"
+  }
+}

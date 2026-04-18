@@ -1,19 +1,19 @@
 {
-  "name": "modular-context",
-  "version": "1.4.7",
+  "name": "modular-context-monorepo",
+  "version": "0.0.0",
   "private": true,
+  "description": "Monorepo: Obsidian plugin + standalone Electron app sharing portable terminal/agent/UI modules",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
-    "build": "node esbuild.config.mjs",
-    "version": "node version-bump.mjs && git add manifest.json versions.json"
-  },
-  "dependencies": {
-    "@xterm/xterm": "^5.5.0",
-    "@xterm/addon-fit": "^0.10.0"
+    "build:plugin": "npm --workspace packages/plugin run build",
+    "build:app": "npm --workspace packages/app run build",
+    "build:shared": "npm --workspace packages/shared run build",
+    "build": "npm run build:shared && npm run build:plugin && npm run build:app",
+    "dev:app": "npm --workspace packages/app run dev"
   },
   "devDependencies": {
-    "esbuild": "^0.25.0",
-    "obsidian": "latest",
-    "typescript": "^5.4.0",
-    "@types/node": "^20.0.0"
+    "7zip-bin": "^5.2.0"
   }
 }

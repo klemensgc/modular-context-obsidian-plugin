@@ -7,11 +7,9 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "outDir": "./dist",
     "declaration": false,
-    "jsx": "react",
     "lib": ["ES2020", "DOM"],
-    "types": ["node"]
-  },
-  "include": ["main.ts"]
+    "types": ["node"],
+    "resolveJsonModule": true
+  }
 }

@@ -13,3 +13,18 @@ data.json
 
 # Exclude macOS Finder (System Explorer) View States
 .DS_Store
+
+# Ralph loop progress files (re-created each run)
+_progress.md
+
+# Nested experimental projects (separate repos — not part of monorepo)
+internetvin-terminal/
+modular-context-skills/
+obsidian plugin screenshots/
+
+# Electron app build outputs
+packages/app/dist/
+packages/app/dist-app/
+
+# Google OAuth client secret
+packages/plugin/.env.local

@@ -37,6 +37,34 @@ An Obsidian plugin that gives you **multiple AI coding terminals side-by-side** 
 - **Drag-and-drop** — Drag files from Finder or Obsidian to paste shell-escaped paths
 - **Session persistence** — Tab names, glyphs, and layout survive restarts
 - **Auto-onboarding** — First install triggers a setup agent that builds your vault structure
+- **Google Workspace (Beta)** — Connect Gmail + Calendar as MCP tools for Claude Code. Tokens encrypted locally via Electron safeStorage + OS keychain. [Setup guide below](#google-workspace-beta)
+
+---
+
+## Google Workspace (Beta)
+
+Open-source, local-first alternative to Shortwave/Superhuman/Sauna. Your Gmail + Calendar as tools Claude Code can call — tokens encrypted locally, never leave your machine.
+
+**Architecture:**
+- OAuth 2.0 desktop flow with loopback redirect + PKCE S256
+- Tokens encrypted via Electron `safeStorage` (OS keychain backs it)
+- Stored in `vault/.modular-context/tokens.enc` (AES-256, auto `.gitignore`)
+- MCP server integration planned for W2 (exposes `gmail_search`, `gmail_draft`, `calendar_list_events`, `calendar_create_event`)
+
+**Two connect paths:**
+
+1. **Quick Connect (beta, hosted)** — uses a shared OAuth client. Limit 100 users during beta. Zero setup.
+2. **Bring Your Own OAuth Client** — you create your own Google Cloud OAuth client. Unlimited users, full sovereignty. ~5 min setup.
+
+**Setup:** open the `(i)` info modal → "Connect accounts" section → click Google Workspace. Alternatively use command palette: `Google Workspace: Connect`.
+
+**Commands:**
+- `Google Workspace: Connect` — open onboarding modal
+- `Google Workspace: Disconnect` — clear tokens
+- `Google Workspace: Reconnect` — switch accounts
+- `Google Workspace: Status` — show connection state
+
+**Privacy:** no cloud, no telemetry. Server logs never contain tokens, email bodies, or subject lines. Uninstall = true uninstall.
 
 ---
 

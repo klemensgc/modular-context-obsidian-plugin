@@ -552,18 +552,38 @@
   inset: 0;
   z-index: 50;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--background-primary-alt);
-  border: 2px dashed var(--interactive-accent);
+  align-items: stretch;
+  justify-content: stretch;
   border-radius: 8px;
   opacity: 0;
   transition: opacity 0.15s ease;
   pointer-events: none;
+  gap: 4px;
+  padding: 4px;
+  background: var(--background-primary-alt);
 }
 
 .mc-terminal-dropzone.is-visible {
   opacity: 1;
+}
+
+.mc-dropzone-half {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 2px dashed var(--background-modifier-border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+
+.mc-dropzone-half.is-active {
+  border-color: var(--interactive-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 8%, transparent);
+  color: var(--interactive-accent);
 }
 
 .mc-dropzone-label {
@@ -571,7 +591,123 @@
   font-size: 13px;
   font-weight: 450;
   letter-spacing: 0.02em;
-  color: var(--interactive-accent);
+}
+
+/* --- File overlay (file opened in terminal pane) --- */
+.mc-terminal-session.has-file-overlay > .xterm,
+.mc-terminal-session.has-file-overlay > .mc-session-toolbar {
+  display: none !important;
+}
+
+.mc-file-overlay {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--background-primary);
+}
+
+.mc-file-overlay-toolbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 28px;
+  padding: 0 6px 0 10px;
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.mc-file-overlay-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.mc-file-overlay-icon {
+  flex-shrink: 0;
+  color: var(--text-faint);
+  display: flex;
+  align-items: center;
+}
+
+.mc-file-overlay-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.mc-file-overlay-name {
+  font-size: 11px;
+  font-family: var(--font-interface);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mc-file-overlay-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.mc-file-overlay-btn {
+  all: unset;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  color: var(--text-faint);
+}
+
+.mc-file-overlay-btn:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.mc-file-overlay-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.mc-file-overlay-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 16px 20px;
+}
+
+.mc-file-overlay-markdown {
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.mc-file-overlay-raw {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-normal);
+}
+
+.mc-file-overlay-image {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
+
+.mc-file-overlay-error {
+  color: var(--text-muted);
+  font-family: var(--font-interface);
+  font-size: 13px;
 }
 
 .mc-drop-badge {
@@ -2416,4 +2552,265 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
   grid-template-columns: 1fr 1fr 1fr;
   grid-template-rows: 1fr 1fr 1fr 1fr;
   gap: 4px;
+}
+
+/* ---------- Google Workspace — ConnectGoogleModal ---------- */
+
+.mc-connect-google-modal {
+  padding: 12px 4px;
+  min-width: 480px;
+  max-width: 560px;
+}
+
+.mc-connect-google-header {
+  margin-bottom: 20px;
+}
+
+.mc-connect-google-header h2 {
+  margin: 0 0 4px 0;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.mc-connect-google-subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.mc-connect-google-body {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 8px 0;
+}
+
+.mc-connect-google-notice {
+  padding: 12px 14px;
+  background: var(--background-secondary);
+  border-left: 3px solid var(--interactive-accent);
+  border-radius: 4px;
+  margin-bottom: 14px;
+  font-size: 13px;
+}
+
+.mc-connect-google-notice p {
+  margin: 0;
+}
+
+/* Scope disclosure — expandable details */
+.mc-scope-disclosure {
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  background: var(--background-secondary);
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.mc-scope-disclosure summary {
+  cursor: pointer;
+  font-weight: 500;
+  user-select: none;
+  padding: 4px 0;
+}
+
+.mc-scope-disclosure summary:hover {
+  color: var(--interactive-accent);
+}
+
+.mc-scope-disclosure ul {
+  margin: 10px 0 4px 0;
+  padding-left: 18px;
+}
+
+.mc-scope-disclosure li {
+  margin-bottom: 6px;
+  line-height: 1.4;
+}
+
+/* BYO (Bring Your Own) advanced section */
+.mc-byo-section {
+  margin-top: 16px;
+  padding: 12px 14px;
+  background: var(--background-secondary);
+  border-radius: 6px;
+}
+
+.mc-byo-section summary {
+  cursor: pointer;
+  font-weight: 500;
+  user-select: none;
+  font-size: 13px;
+  padding: 4px 0;
+}
+
+.mc-byo-section summary:hover {
+  color: var(--interactive-accent);
+}
+
+.mc-byo-section .setting-item {
+  padding: 10px 0;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.mc-byo-section .setting-item:first-of-type {
+  border-top: none;
+}
+
+/* OAuth buttons */
+.mc-oauth-button-primary,
+.mc-oauth-button-secondary {
+  padding: 10px 18px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  border: none;
+  margin-top: 10px;
+  transition: all 0.15s ease;
+}
+
+.mc-oauth-button-primary {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  display: block;
+  width: 100%;
+}
+
+.mc-oauth-button-primary:hover {
+  background: var(--interactive-accent-hover);
+}
+
+.mc-oauth-button-secondary {
+  background: var(--background-modifier-border);
+  color: var(--text-normal);
+  margin-right: 8px;
+}
+
+.mc-oauth-button-secondary:hover {
+  background: var(--background-modifier-border-hover);
+}
+
+/* Connection state — 4 variants */
+.mc-connection-state {
+  text-align: center;
+  padding: 28px 16px 20px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.mc-connection-state h3 {
+  margin: 8px 0 4px 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.mc-connection-state p {
+  margin: 4px 0;
+  font-size: 14px;
+}
+
+.mc-connection-icon {
+  font-size: 48px;
+  line-height: 1;
+  margin-bottom: 8px;
+}
+
+.mc-connection-state-connecting {
+  background: rgba(59, 130, 246, 0.08);
+  color: var(--text-normal);
+}
+
+.mc-connecting-spinner {
+  font-size: 40px;
+  margin-bottom: 12px;
+  animation: mc-spin 1.2s linear infinite;
+}
+
+@keyframes mc-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.mc-connection-state-connected {
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.mc-connection-state-connected .mc-connection-icon {
+  color: #16a34a;
+}
+
+.mc-connection-state-error {
+  background: rgba(220, 38, 38, 0.08);
+}
+
+.mc-connection-state-error .mc-connection-icon {
+  color: #dc2626;
+}
+
+.mc-connected-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 4px;
+}
+
+/* Trust messaging */
+.mc-trust-message {
+  margin-top: 20px;
+  padding: 12px 14px;
+  background: var(--background-secondary);
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.mc-trust-message strong {
+  color: var(--text-normal);
+}
+
+/* OnboardingModal "Connect accounts" section integration */
+.mc-onboarding-connect-accounts {
+  margin: 12px 0 20px;
+  padding: 12px 14px;
+  background: var(--background-secondary);
+  border-radius: 6px;
+}
+
+.mc-onboarding-connect-accounts-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  padding: 8px 0;
+}
+
+.mc-onboarding-connect-accounts-row:hover {
+  opacity: 0.8;
+}
+
+.mc-connection-pill {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.mc-connection-pill.is-disconnected {
+  background: var(--background-modifier-border);
+  color: var(--text-muted);
+}
+
+.mc-connection-pill.is-connected {
+  background: rgba(34, 197, 94, 0.15);
+  color: #16a34a;
+}
+
+.mc-connection-pill.is-error {
+  background: rgba(220, 38, 38, 0.15);
+  color: #dc2626;
 }

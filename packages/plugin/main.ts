@@ -1,92 +1,40 @@
-import { Plugin, ItemView, WorkspaceLeaf, App, TFile, setIcon, SuggestModal, Modal, Menu, addIcon, Setting, PluginSettingTab, Notice, requestUrl } from "obsidian";
+import { Plugin, ItemView, WorkspaceLeaf, App, TFile, setIcon, SuggestModal, Modal, Menu, addIcon, Setting, PluginSettingTab, Notice, requestUrl, MarkdownRenderer, Component } from "obsidian";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import type { ChildProcess } from "child_process";
+import {
+  SESSION_GLYPHS,
+  SLOT_COUNT,
+  buildXtermTheme,
+  BookmarkManager,
+  AgentTracker,
+  FullscreenManager,
+  PTY_HELPER_SOURCE,
+  spawnPtyShell,
+  MIN_DWELL_MS,
+  IDLE_PROMPT_MS,
+  IDLE_SAFETY_MS,
+  REVIVE_BYTES,
+  REVIVE_WINDOW_MS,
+  AUTO_DETECT_WINDOW_MS,
+  type FullscreenLayout,
+  type DisplayMode,
+  type Bookmark,
+  type TrackedSession,
+  type TrackableSession,
+} from "@mc/shared";
+import { ConnectGoogleModal } from "./src/google/ui/connect-google-modal";
+import { createStorageMethod } from "./src/google/tokens/storage";
+import { startRefreshTimer, type RefreshTimerHandle } from "./src/google/tokens/refresh";
+import type { TokenStorageMethod, OAuthConfig, StoredTokens } from "@mc/shared";
+import { GOOGLE_WORKSPACE_SCOPES } from "@mc/shared";
+
+// Esbuild injects these from packages/plugin/.env.local (empty strings if file absent)
+declare const process: { env: { GOOGLE_OAUTH_CLIENT_ID: string; GOOGLE_OAUTH_CLIENT_SECRET: string } };
 
 const VIEW_TYPE = "mc-terminal-view";
 let ptyHelperPath = "";
-
-const PTY_HELPER_PY = `\
-"""PTY helper for modular-context. Wraps zsh in a real PTY with resize support."""
-import os, select, signal, struct, fcntl, termios, pty
-
-def main():
-    cols = int(os.environ.get("MC_TERM_COLS", "80"))
-    rows = int(os.environ.get("MC_TERM_ROWS", "24"))
-    master, slave = pty.openpty()
-    fcntl.ioctl(master, termios.TIOCSWINSZ,
-                struct.pack("HHHH", rows, cols, 0, 0))
-    pid = os.fork()
-    if pid == 0:
-        os.close(master)
-        os.setsid()
-        fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
-        os.dup2(slave, 0)
-        os.dup2(slave, 1)
-        os.dup2(slave, 2)
-        if slave > 2:
-            os.close(slave)
-        os.execvp("/bin/zsh", ["/bin/zsh", "-i", "-l"])
-    os.close(slave)
-    def resize(c, r):
-        fcntl.ioctl(master, termios.TIOCSWINSZ,
-                    struct.pack("HHHH", r, c, 0, 0))
-        os.kill(pid, signal.SIGWINCH)
-    buf = b""
-    SEQ_START = b"\\x1b]R;"
-    SEQ_END = b"\\x07"
-    try:
-        while True:
-            rlist, _, _ = select.select([0, master], [], [])
-            if 0 in rlist:
-                data = os.read(0, 4096)
-                if not data:
-                    break
-                buf += data
-                while SEQ_START in buf:
-                    idx = buf.index(SEQ_START)
-                    end = buf.find(SEQ_END, idx)
-                    if end < 0:
-                        if idx > 0:
-                            os.write(master, buf[:idx])
-                        buf = buf[idx:]
-                        break
-                    if idx > 0:
-                        os.write(master, buf[:idx])
-                    seq = buf[idx + len(SEQ_START):end]
-                    buf = buf[end + 1:]
-                    try:
-                        parts = seq.split(b";")
-                        if len(parts) == 2:
-                            resize(int(parts[0]), int(parts[1]))
-                    except (ValueError, IndexError):
-                        pass
-                else:
-                    if buf:
-                        os.write(master, buf)
-                        buf = b""
-            if master in rlist:
-                try:
-                    data = os.read(master, 4096)
-                    if not data:
-                        break
-                    os.write(1, data)
-                except OSError:
-                    break
-    except Exception:
-        pass
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except ProcessLookupError:
-        pass
-    try:
-        os.waitpid(pid, 0)
-    except ChildProcessError:
-        pass
-
-if __name__ == "__main__":
-    main()
-`;
+// PTY helper Python source now imported from @mc/shared (bundled via esbuild .py text loader).
 
 // --- Theme helpers ---
 // Build an xterm.js ITheme from Obsidian's CSS variables at runtime.
@@ -107,64 +55,12 @@ function isGoodAutoName(input: string): boolean {
   return true;
 }
 
-function getObsidianTheme(): Record<string, string> {
+function getObsidianTheme() {
   const s = getComputedStyle(document.body);
-  const get = (v: string) => s.getPropertyValue(v).trim();
-  const isDark = document.body.classList.contains("theme-dark");
-
-  const bg = get("--background-primary") || (isDark ? "#1e1e1e" : "#ffffff");
-  const fg = get("--text-normal") || (isDark ? "#dcddde" : "#1a1a1a");
-  const accent = get("--interactive-accent") || (isDark ? "#7f6df2" : "#705dcf");
-  const muted = get("--text-muted") || (isDark ? "#999" : "#666");
-
-  // ANSI palette: two variants for dark and light backgrounds
-  const ansi = isDark
-    ? {
-        black:         "#1a1a2e",
-        red:           "#e06c75",
-        green:         "#98c379",
-        yellow:        "#e5c07b",
-        blue:          "#61afef",
-        magenta:       "#c678dd",
-        cyan:          "#56b6c2",
-        white:         "#abb2bf",
-        brightBlack:   "#5c6370",
-        brightRed:     "#e88388",
-        brightGreen:   "#a9d18e",
-        brightYellow:  "#ebd09c",
-        brightBlue:    "#7ec8e3",
-        brightMagenta: "#d19de0",
-        brightCyan:    "#73cdd6",
-        brightWhite:   "#f0f0f0",
-      }
-    : {
-        black:         "#383a42",
-        red:           "#d73a49",
-        green:         "#22863a",
-        yellow:        "#b08800",
-        blue:          "#0366d6",
-        magenta:       "#6f42c1",
-        cyan:          "#0598bc",
-        white:         "#6a737d",
-        brightBlack:   "#959da5",
-        brightRed:     "#cb2431",
-        brightGreen:   "#28a745",
-        brightYellow:  "#dbab09",
-        brightBlue:    "#2188ff",
-        brightMagenta: "#8a63d2",
-        brightCyan:    "#3192aa",
-        brightWhite:   "#24292e",
-      };
-
-  return {
-    background: bg,
-    foreground: fg,
-    cursor: muted,
-    cursorAccent: bg,
-    selectionBackground: isDark ? "rgba(255, 255, 255, 0.15)" : "rgba(0, 0, 0, 0.15)",
-    selectionForeground: isDark ? "#f0f0f0" : "#1a1a1a",
-    ...ansi,
-  };
+  return buildXtermTheme({
+    getCssVar: (v) => s.getPropertyValue(v).trim(),
+    isDark: document.body.classList.contains("theme-dark"),
+  });
 }
 
 // --- WikiLinkAutocomplete ---
@@ -577,149 +473,105 @@ class WikiLinkAutocomplete {
 }
 
 // --- BookmarkManager ---
+// Now imported from @mc/shared (see top of file).
 
-interface Bookmark {
-  id: number;
-  marker: any; // IMarker
-  decoration: any; // IDecoration | null
-  label: string;
-  timestamp: number;
-  pipEl: HTMLElement | null;
-}
+// --- FileOverlay ---
 
-class BookmarkManager {
-  private bookmarks: Bookmark[] = [];
-  private nextId = 1;
-  private terminal: Terminal;
-  private containerEl: HTMLElement;
-  private stripEl: HTMLElement;
-  private updateTimer: ReturnType<typeof setTimeout> | null = null;
-  private disposables: { dispose(): void }[] = [];
+/** Renders a vault file inside a terminal pane, replacing the terminal visually.
+ *  Used when a file is dragged from Obsidian's file explorer onto a pane. */
+class FileOverlay {
+  containerEl: HTMLElement;
+  filePath: string;       // absolute path
+  private app: App;
+  private component: Component;
+  destroyed = false;
 
-  constructor(terminal: Terminal, containerEl: HTMLElement) {
-    this.terminal = terminal;
-    this.containerEl = containerEl;
+  constructor(parent: HTMLElement, filePath: string, app: App, onClose: () => void) {
+    this.filePath = filePath;
+    this.app = app;
+    this.component = new Component();
+    this.component.load();
 
-    // Create the bookmark strip (vertical rail on right edge)
-    this.stripEl = document.createElement("div");
-    this.stripEl.className = "mc-bookmark-strip";
-    this.containerEl.appendChild(this.stripEl);
+    this.containerEl = document.createElement("div");
+    this.containerEl.className = "mc-file-overlay";
+    parent.appendChild(this.containerEl);
 
-    // Listen for events that require pip repositioning
-    const debouncedUpdate = () => {
-      if (this.updateTimer) clearTimeout(this.updateTimer);
-      this.updateTimer = setTimeout(() => this.updateStrip(), 50);
-    };
+    const pathMod = require("path");
+    const vaultPath = (app.vault.adapter as any).basePath as string;
+    const vaultRelative = pathMod.relative(vaultPath, filePath);
+    const basename = pathMod.basename(filePath);
 
-    this.disposables.push(this.terminal.onScroll(debouncedUpdate));
-    this.disposables.push(this.terminal.onLineFeed(debouncedUpdate));
-    this.disposables.push(this.terminal.onResize(debouncedUpdate));
-  }
+    // Toolbar
+    const toolbar = this.containerEl.createDiv({ cls: "mc-file-overlay-toolbar" });
+    const fileInfo = toolbar.createDiv({ cls: "mc-file-overlay-info" });
+    const iconEl = fileInfo.createDiv({ cls: "mc-file-overlay-icon" });
+    setIcon(iconEl, "file-text");
+    fileInfo.createSpan({ cls: "mc-file-overlay-name", text: basename });
 
-  addBookmark(label?: string) {
-    const buf = this.terminal.buffer.active;
-    // If scrolled back, bookmark the top of the viewport; otherwise bookmark cursor line
-    const viewportTop = buf.viewportY;
-    const cursorLine = buf.baseY + buf.cursorY;
-    const isScrolledBack = viewportTop < buf.baseY;
-    const line = isScrolledBack ? viewportTop : cursorLine;
+    const actions = toolbar.createDiv({ cls: "mc-file-overlay-actions" });
 
-    const marker = this.terminal.registerMarker(line - cursorLine);
-    if (!marker) return;
-
-    const id = this.nextId++;
-    const bookmarkLabel = label || `#${id}`;
-
-    // Try to create a gutter decoration
-    let decoration: any = null;
-    try {
-      decoration = this.terminal.registerDecoration({ marker, anchor: "left" });
-      if (decoration) {
-        decoration.onRender((el: HTMLElement) => {
-          el.classList.add("mc-bookmark-gutter");
-          el.title = bookmarkLabel;
-          el.addEventListener("click", () => this.jumpTo(bookmark));
-        });
+    const openBtn = actions.createEl("button", { cls: "mc-file-overlay-btn" });
+    setIcon(openBtn, "external-link");
+    openBtn.title = "Open in editor";
+    openBtn.addEventListener("click", () => {
+      const file = this.app.vault.getAbstractFileByPath(vaultRelative);
+      if (file instanceof TFile) {
+        this.app.workspace.openLinkText(vaultRelative, "", false);
       }
-    } catch {
-      // Alt buffer or other issue - decoration stays null
+    });
+
+    const closeBtn = actions.createEl("button", { cls: "mc-file-overlay-btn mc-file-overlay-close" });
+    setIcon(closeBtn, "x");
+    closeBtn.title = "Close file view";
+    closeBtn.addEventListener("click", () => onClose());
+
+    // Content
+    const contentEl = this.containerEl.createDiv({ cls: "mc-file-overlay-content" });
+    this.renderContent(contentEl, vaultRelative, basename);
+  }
+
+  private async renderContent(contentEl: HTMLElement, vaultRelative: string, basename: string) {
+    const pathMod = require("path");
+    const ext = pathMod.extname(basename).toLowerCase();
+    const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"]);
+
+    if (IMAGE_EXTS.has(ext)) {
+      const img = contentEl.createEl("img", { cls: "mc-file-overlay-image" });
+      img.src = `file://${this.filePath}`;
+      img.alt = basename;
+      return;
     }
 
-    // Create pip in the strip
-    const pipEl = document.createElement("div");
-    pipEl.className = "mc-bookmark-pip";
-    pipEl.title = bookmarkLabel;
-    pipEl.addEventListener("click", () => this.jumpTo(bookmark));
-    this.stripEl.appendChild(pipEl);
-
-    const bookmark: Bookmark = { id, marker, decoration, label: bookmarkLabel, timestamp: Date.now(), pipEl };
-    this.bookmarks.push(bookmark);
-
-    // Auto-remove when scrollback is trimmed
-    marker.onDispose(() => this.removeBookmark(bookmark));
-
-    this.updateStrip();
-  }
-
-  jumpTo(bookmark: Bookmark) {
-    const line = bookmark.marker.line;
-    this.terminal.scrollToLine(line);
-
-    // Briefly highlight the pip
-    if (bookmark.pipEl) {
-      bookmark.pipEl.addClass("is-active");
-      setTimeout(() => bookmark.pipEl?.removeClass("is-active"), 600);
-    }
-  }
-
-  jumpNext() {
-    if (this.bookmarks.length === 0) return;
-    const sorted = [...this.bookmarks].sort((a, b) => a.marker.line - b.marker.line);
-    const viewportY = this.terminal.buffer.active.viewportY;
-    const next = sorted.find((b) => b.marker.line > viewportY + 1);
-    this.jumpTo(next ?? sorted[0]); // wrap around
-  }
-
-  jumpPrev() {
-    if (this.bookmarks.length === 0) return;
-    const sorted = [...this.bookmarks].sort((a, b) => a.marker.line - b.marker.line);
-    const viewportY = this.terminal.buffer.active.viewportY;
-    const prev = sorted.slice().reverse().find((b) => b.marker.line < viewportY);
-    this.jumpTo(prev ?? sorted[sorted.length - 1]); // wrap around
-  }
-
-  clearAll() {
-    for (const b of [...this.bookmarks]) {
-      this.removeBookmark(b);
-    }
-  }
-
-  private removeBookmark(bookmark: Bookmark) {
-    const idx = this.bookmarks.indexOf(bookmark);
-    if (idx === -1) return;
-    this.bookmarks.splice(idx, 1);
-    bookmark.pipEl?.remove();
-    try { bookmark.decoration?.dispose(); } catch { /* already disposed */ }
-    try { bookmark.marker?.dispose(); } catch { /* already disposed */ }
-  }
-
-  private updateStrip() {
-    const totalLines = this.terminal.buffer.active.length;
-    if (totalLines === 0) return;
-    for (const b of this.bookmarks) {
-      if (b.pipEl) {
-        const pct = (b.marker.line / totalLines) * 100;
-        b.pipEl.style.top = `${pct}%`;
+    const file = this.app.vault.getAbstractFileByPath(vaultRelative);
+    if (!(file instanceof TFile)) {
+      // Try reading from filesystem directly (external file)
+      try {
+        const fs = require("fs");
+        const raw = fs.readFileSync(this.filePath, "utf-8");
+        const pre = contentEl.createEl("pre", { cls: "mc-file-overlay-raw" });
+        pre.createEl("code", { text: raw });
+      } catch {
+        contentEl.createSpan({ cls: "mc-file-overlay-error", text: "Cannot read file" });
       }
+      return;
+    }
+
+    const content = await this.app.vault.read(file);
+
+    if ([".md", ".markdown"].includes(ext)) {
+      const wrapper = contentEl.createDiv({ cls: "mc-file-overlay-markdown markdown-rendered" });
+      await MarkdownRenderer.render(this.app, content, wrapper, vaultRelative, this.component);
+    } else {
+      const pre = contentEl.createEl("pre", { cls: "mc-file-overlay-raw" });
+      pre.createEl("code", { text: content });
     }
   }
 
   destroy() {
-    if (this.updateTimer) clearTimeout(this.updateTimer);
-    for (const d of this.disposables) d.dispose();
-    this.disposables = [];
-    this.clearAll();
-    this.stripEl.remove();
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this.component.unload();
+    this.containerEl.remove();
   }
 }
 
@@ -738,6 +590,7 @@ class TerminalSession {
   private bookmarkManager: BookmarkManager | null = null;
   hasActivity = false;
   destroyed = false;
+  fileOverlay: FileOverlay | null = null;
   /** Visual glyph for compact sidebar. Glyph id (e.g. "circle") or skill icon name (e.g. "rocket"). */
   glyph = "";
   _lastStdoutAt = 0;
@@ -774,23 +627,14 @@ class TerminalSession {
     // Grab the hidden textarea xterm.js creates for input
     this.textareaEl = this.containerEl.querySelector(".xterm-helper-textarea");
 
-    // Spawn zsh inside a real PTY via Python helper.
-    // The helper accepts resize commands so the shell reflows to fit the panel.
-    const { spawn } = require("child_process");
-    const helperScript = ptyHelperPath;
-
-    // Strip CLAUDECODE env var so Claude Code can be launched inside the terminal
-    const { CLAUDECODE, ...cleanEnv } = process.env;
-    this.process = spawn("python3", [helperScript], {
+    // Spawn zsh inside a real PTY via shared spawnPtyShell helper (uses Python PTY helper).
+    const { process: ptyProcess } = spawnPtyShell({
+      helperPath: ptyHelperPath,
       cwd,
-      env: {
-        ...cleanEnv,
-        TERM: "xterm-256color",
-        LANG: "en_US.UTF-8",
-        MC_TERM_COLS: "80",
-        MC_TERM_ROWS: "24",
-      },
+      cols: 80,
+      rows: 24,
     });
+    this.process = ptyProcess;
 
     this.process.on("error", (err: Error) => {
       console.error("[modular-context] Failed to spawn python3:", err);
@@ -838,17 +682,36 @@ class TerminalSession {
     // handlers can intercept them.
     const captureOpt = { capture: true };
     let dragCounter = 0;
+    // Capture Obsidian's internal drag info (tab/file-explorer drags) early —
+    // dragManager.draggable may be cleared by the time the drop event fires.
+    let savedDraggable: any = null;
     this.containerEl.addEventListener("dragover", (e) => {
       e.preventDefault();
       e.stopPropagation();
       if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+      // Highlight active drop zone half based on cursor position
+      if (this.dropZoneEl) {
+        const rect = this.dropZoneEl.getBoundingClientRect();
+        const midX = rect.left + rect.width / 2;
+        const leftHalf = this.dropZoneEl.querySelector(".mc-dropzone-paste");
+        const rightHalf = this.dropZoneEl.querySelector(".mc-dropzone-open");
+        if (leftHalf && rightHalf) {
+          leftHalf.classList.toggle("is-active", e.clientX <= midX);
+          rightHalf.classList.toggle("is-active", e.clientX > midX);
+        }
+      }
     }, captureOpt);
 
     this.containerEl.addEventListener("dragenter", (e) => {
       e.preventDefault();
       e.stopPropagation();
       dragCounter++;
-      if (dragCounter === 1) this.showDropZone();
+      if (dragCounter === 1) {
+        this.showDropZone();
+        // Snapshot Obsidian's internal draggable (set by tab / file-explorer drags)
+        const dm = (this.app as any).dragManager;
+        savedDraggable = dm?.draggable ?? dm?.currentDraggable ?? null;
+      }
     }, captureOpt);
 
     this.containerEl.addEventListener("dragleave", (e) => {
@@ -858,15 +721,20 @@ class TerminalSession {
       if (dragCounter <= 0) {
         dragCounter = 0;
         this.hideDropZone();
+        savedDraggable = null;
       }
     }, captureOpt);
 
     this.containerEl.addEventListener("drop", (e) => {
       e.preventDefault();
       e.stopPropagation();
+      // Detect which drop zone half was targeted
+      const dzRect = this.dropZoneEl?.getBoundingClientRect();
+      const wantOpen = dzRect ? e.clientX > dzRect.left + dzRect.width / 2 : false;
       dragCounter = 0;
       this.hideDropZone();
-      this.handleDrop(e);
+      this.handleDrop(e, wantOpen, savedDraggable);
+      savedDraggable = null;
     }, captureOpt);
   }
 
@@ -877,7 +745,15 @@ class TerminalSession {
     if (this.dropZoneEl) return;
     this.dropZoneEl = document.createElement("div");
     this.dropZoneEl.className = "mc-terminal-dropzone";
-    this.dropZoneEl.innerHTML = `<span class="mc-dropzone-label">Drop file here</span>`;
+    this.dropZoneEl.innerHTML = `
+      <div class="mc-dropzone-half mc-dropzone-paste">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 10H3"/><path d="M21 6H3"/><path d="M21 14H3"/><path d="M17 18H3"/></svg>
+        <span class="mc-dropzone-label">Paste path</span>
+      </div>
+      <div class="mc-dropzone-half mc-dropzone-open">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        <span class="mc-dropzone-label">Open here</span>
+      </div>`;
     this.containerEl.appendChild(this.dropZoneEl);
     // Trigger animation on next frame
     requestAnimationFrame(() => this.dropZoneEl?.addClass("is-visible"));
@@ -931,8 +807,10 @@ class TerminalSession {
     }, 3000);
   }
 
-  /** Handle a drop event: extract file paths and write them to the shell */
-  private handleDrop(e: DragEvent) {
+  /** Handle a drop event: extract file paths and write them to the shell,
+   *  or open the file as a file overlay if wantOpen is true.
+   *  @param draggable Obsidian's internal drag info (from dragManager), captured during dragenter */
+  private handleDrop(e: DragEvent, wantOpen = false, draggable?: any) {
     const paths: string[] = [];
     const vaultPath = (this.app.vault.adapter as any).basePath as string;
     const pathMod = require("path");
@@ -998,7 +876,23 @@ class TerminalSession {
       }
     }
 
+    // 4. Obsidian internal drag (tab drags, file-explorer drags via dragManager).
+    //    dragManager.draggable is set by Obsidian when dragging tabs or files
+    //    but doesn't populate the standard dataTransfer with file paths.
+    if (paths.length === 0 && draggable) {
+      const file = draggable.file ?? draggable.files?.[0];
+      if (file instanceof TFile) {
+        paths.push(pathMod.join(vaultPath, file.path));
+      }
+    }
+
     if (paths.length === 0) return;
+
+    // "Open here" mode: render the file in an overlay, hiding the terminal
+    if (wantOpen) {
+      this.openFileOverlay(paths[0]);
+      return;
+    }
 
     // Shell-escape paths and join with spaces
     const escaped = paths.map((p) => this.shellEscape(p)).join(" ");
@@ -1109,6 +1003,29 @@ class TerminalSession {
   prevBookmark() { this.bookmarkManager?.jumpPrev(); }
   clearBookmarks() { this.bookmarkManager?.clearAll(); }
 
+  /** Open a file overlay, hiding the terminal. The file is rendered as
+   *  markdown (for .md) or raw text. Close button restores the terminal. */
+  openFileOverlay(filePath: string) {
+    this.closeFileOverlay();
+    this.containerEl.classList.add("has-file-overlay");
+    this.fileOverlay = new FileOverlay(this.containerEl, filePath, this.app, () => {
+      this.closeFileOverlay();
+    });
+  }
+
+  closeFileOverlay() {
+    if (this.fileOverlay) {
+      this.fileOverlay.destroy();
+      this.fileOverlay = null;
+    }
+    this.containerEl.classList.remove("has-file-overlay");
+    // Re-fit and focus terminal after revealing it
+    requestAnimationFrame(() => {
+      this.fit();
+      this.focus();
+    });
+  }
+
   destroy() {
     // Mark destroyed FIRST so any callback that slips through bails out
     this.destroyed = true;
@@ -1123,6 +1040,7 @@ class TerminalSession {
 
     this.bookmarkManager?.destroy();
     this.autocomplete?.destroy();
+    if (this.fileOverlay) { this.fileOverlay.destroy(); this.fileOverlay = null; }
     try {
       this.process.kill("SIGTERM");
     } catch {
@@ -1130,430 +1048,6 @@ class TerminalSession {
     }
     try { this.terminal.dispose(); } catch {}
     this.containerEl.remove();
-  }
-}
-
-// --- FullscreenManager ---
-
-type FullscreenLayout = "single" | "split-h" | "split-v" | "grid" | "grid-6" | "grid-8" | "grid-12";
-
-/** Session glyphs — 8 distinct geometric shapes for visual terminal identification.
- *  Stroke-only SVGs, 14×14, designed to be distinguishable at small sizes. */
-const SESSION_GLYPHS: { id: string; svg: string }[] = [
-  { id: "circle",   svg: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="7" cy="7" r="5.5"/></svg>' },
-  { id: "square",   svg: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="2" width="10" height="10" rx="1"/></svg>' },
-  { id: "triangle", svg: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M7 2 L12.5 12 L1.5 12 Z"/></svg>' },
-  { id: "diamond",  svg: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M7 1.5 L12.5 7 L7 12.5 L1.5 7 Z"/></svg>' },
-  { id: "hexagon",  svg: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M7 1 L12.2 4 L12.2 10 L7 13 L1.8 10 L1.8 4 Z"/></svg>' },
-  { id: "star",     svg: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M7 1 L8.8 5.2 L13 5.2 L9.6 8 L10.8 12.5 L7 9.8 L3.2 12.5 L4.4 8 L1 5.2 L5.2 5.2 Z"/></svg>' },
-  { id: "cross",    svg: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M7 2 L7 12 M2 7 L12 7"/></svg>' },
-  { id: "chevron",  svg: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 3 L8 7 L3 11 M7 3 L12 7 L7 11"/></svg>' },
-  { id: "arrow",    svg: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 7 L12 7 M8 3 L12 7 L8 11"/></svg>' },
-  { id: "dot3",     svg: '<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><circle cx="3" cy="7" r="1.5"/><circle cx="7" cy="7" r="1.5"/><circle cx="11" cy="7" r="1.5"/></svg>' },
-  { id: "slash",    svg: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M10 2 L4 12"/></svg>' },
-  { id: "wave",     svg: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M1 7 C3 3, 5 3, 7 7 C9 11, 11 11, 13 7"/></svg>' },
-];
-
-/** Number of pane slots for each layout. Used by computeVisible() and renderLayout(). */
-const SLOT_COUNT: Record<FullscreenLayout, number> = {
-  "single": 1,
-  "split-h": 2,
-  "split-v": 2,
-  "grid": 4,
-  "grid-6": 6,
-  "grid-8": 8,
-  "grid-12": 12,
-};
-
-/** Display mode is the single source of truth for "what mode + which layout".
- *  Owned by TerminalView. FullscreenManager reads from view, never writes its own. */
-interface DisplayMode {
-  kind: "inline" | "fullscreen";
-  layout: FullscreenLayout;
-}
-
-class FullscreenManager {
-  private static overlayOpen = false;
-
-  private view: TerminalView;
-  overlay: HTMLElement | null = null;
-  tabBarEl: HTMLElement | null = null;
-  /** Public so view.renderLayout() can target it directly when fullscreen is active. */
-  gridEl: HTMLElement | null = null;
-  private savedSidebarParent: HTMLElement | null = null;
-  private savedSidebarNextSibling: Node | null = null;
-  private resizeObserver: ResizeObserver | null = null;
-  private resizeTimer: ReturnType<typeof setTimeout> | null = null;
-  private isRenaming = false;
-
-  /** focusedSession delegates to view.activeSession — no independent state. */
-  get focusedSession(): TerminalSession | null { return this.view.activeSession; }
-  set focusedSession(s: TerminalSession | null) {
-    if (s && this.view.sessions.includes(s)) this.view.activeSession = s;
-    else this.view.activeSession = null;
-  }
-
-  /** layout delegates to view.displayMode.layout — no independent state. */
-  get layout(): FullscreenLayout { return this.view.displayMode.layout; }
-  set layout(l: FullscreenLayout) { this.view.displayMode.layout = l; }
-
-  constructor(view: TerminalView) {
-    this.view = view;
-  }
-
-  get isOpen() {
-    return this.overlay !== null;
-  }
-
-  toggle() {
-    if (this.isOpen) {
-      this.exit();
-    } else {
-      this.enter();
-    }
-  }
-
-  enter(layout?: FullscreenLayout) {
-    if (this.isOpen || FullscreenManager.overlayOpen) return;
-    if (this.view.sessions.length === 0) return;
-
-    FullscreenManager.overlayOpen = true;
-
-    // Resolve layout: explicit > view's current > "single"
-    const resolvedLayout = layout ?? this.view.displayMode.layout ?? "single";
-    this.layout = resolvedLayout;  // legacy field, until Iter 10
-
-    // Build overlay DOM (shell only — view.renderLayout populates panes)
-    this.overlay = document.createElement("div");
-    this.overlay.className = "mc-fullscreen-overlay";
-
-    this.gridEl = document.createElement("div");
-    this.gridEl.className = "mc-fullscreen-grid";
-    this.gridEl.dataset.mode = "fullscreen";
-    this.gridEl.dataset.layout = resolvedLayout;
-    this.overlay.appendChild(this.gridEl);
-
-    // Move the existing sidebar into the overlay
-    const sidebar = this.view.sidebarEl;
-    this.savedSidebarParent = sidebar.parentElement;
-    this.savedSidebarNextSibling = sidebar.nextSibling;
-    this.overlay.appendChild(sidebar);
-
-    // Hidden tab bar ref (compat)
-    this.tabBarEl = document.createElement("div");
-
-    // Stop keyboard events from bubbling to Obsidian
-    this.overlay.addEventListener("keydown", (e) => {
-      if (!e.metaKey) e.stopPropagation();
-    });
-    this.overlay.addEventListener("wheel", (e) => e.stopPropagation());
-
-    // Escape to exit (only when autocomplete is not active).
-    // CAPTURE phase so we intercept BEFORE xterm.js eats the Escape key.
-    this.overlay.addEventListener("keydown", (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !this.isRenaming) {
-        const anyAutocomplete = this.view.sessions.some(
-          (s) => (s as any).autocomplete?.active
-        );
-        if (!anyAutocomplete) {
-          e.preventDefault();
-          e.stopPropagation();
-          this.exit();
-        }
-      }
-    }, true);
-
-    document.body.appendChild(this.overlay);
-
-    // KEY: switch view's displayMode → renderLayout() reparents sessions to gridEl
-    this.view.displayMode = { kind: "fullscreen", layout: resolvedLayout };
-    this.view.fs = this;
-    this.view.renderLayout();
-    this.renderFsTabs();
-    this.setupActivityCallbacks();
-
-    // Sync sidebar fullscreen icon
-    this.view.updateFsIcon();
-
-    // Animate in
-    requestAnimationFrame(() => this.overlay?.classList.add("is-visible"));
-
-    // ResizeObserver on grid
-    this.resizeObserver = new ResizeObserver(() => {
-      if (this.resizeTimer) clearTimeout(this.resizeTimer);
-      this.resizeTimer = setTimeout(() => {
-        for (const s of this.view.computeVisible(this.view.displayMode.layout)) s.fit();
-      }, 60);
-    });
-    this.resizeObserver.observe(this.gridEl);
-  }
-
-  exit() {
-    if (!this.overlay) return;
-
-    // Immediately stop blocking clicks and start fade
-    this.overlay.style.pointerEvents = "none";
-    this.overlay.classList.remove("is-visible");
-
-    // Remove overlay after fade animation
-    const overlay = this.overlay;
-    setTimeout(() => overlay.remove(), 150);
-
-    // Restore sidebar to its original position BEFORE clearing refs
-    const sidebar = this.view.sidebarEl;
-    if (this.savedSidebarParent) {
-      if (this.savedSidebarNextSibling && this.savedSidebarNextSibling.parentNode === this.savedSidebarParent) {
-        this.savedSidebarParent.insertBefore(sidebar, this.savedSidebarNextSibling);
-      } else {
-        this.savedSidebarParent.appendChild(sidebar);
-      }
-    }
-    this.savedSidebarParent = null;
-    this.savedSidebarNextSibling = null;
-
-    // Park all sessions before tearing down gridEl, so renderLayout() in inline
-    // mode can find them and rebuild fresh panes inside sessionsEl.
-    for (const s of this.view.sessions) {
-      this.view.parkingEl.appendChild(s.containerEl);
-    }
-
-    // Clear activity callbacks BEFORE clearing refs
-    this.clearActivityCallbacks();
-    this.resizeObserver?.disconnect();
-    this.resizeObserver = null;
-    if (this.resizeTimer) clearTimeout(this.resizeTimer);
-
-    // Clear refs
-    this.overlay = null;
-    this.tabBarEl = null;
-    this.gridEl = null;
-    FullscreenManager.overlayOpen = false;
-
-    // Switch view back to inline; renderLayout() rebuilds panes in sessionsEl
-    const preservedLayout = this.view.displayMode.layout;
-    this.view.displayMode = { kind: "inline", layout: preservedLayout };
-    this.view.fs = null;
-    this.view.renderLayout();
-    this.view.renderTabs();
-
-    // Sync sidebar fullscreen icon
-    this.view.updateFsIcon();
-
-    requestAnimationFrame(() => {
-      this.view.activeSession?.fit();
-      this.view.activeSession?.focus();
-    });
-  }
-
-  setLayout(layout: FullscreenLayout) {
-    // Delegate to view — single source of truth
-    this.layout = layout;  // legacy field, kept in sync until Iter 10
-    this.view.setLayout(layout);
-    this.renderFsTabs();
-  }
-
-  /** Render the fullscreen tab bar: session tabs | layout switcher | actions */
-  renderFsTabs() {
-    if (!this.tabBarEl || this.isRenaming) return;
-    while (this.tabBarEl.firstChild) this.tabBarEl.removeChild(this.tabBarEl.firstChild);
-
-    // Session tabs
-    const tabsArea = document.createElement("div");
-    tabsArea.className = "mc-fs-tabs";
-
-    for (const session of this.view.sessions) {
-      const tab = document.createElement("div");
-      tab.className = "mc-fs-tab";
-      if (session === this.focusedSession) tab.classList.add("is-active");
-      if (session.hasActivity && session !== this.focusedSession) tab.classList.add("has-activity");
-
-      const label = document.createElement("span");
-      label.className = "mc-fs-tab-label";
-      label.textContent = session.name;
-      tab.appendChild(label);
-
-      tab.addEventListener("click", () => {
-        if (this.isRenaming) return;
-        session.hasActivity = false;
-        // Delegate to view — single source of truth for focus + render
-        this.view.switchTo(session);
-        // Keep legacy field in sync
-        this.focusedSession = session;
-      });
-
-      tab.addEventListener("contextmenu", (e) => {
-        e.preventDefault();
-        const menu = new Menu();
-        menu.addItem((item) =>
-          item.setTitle("Rename").setIcon("pencil").onClick(() => {
-            this.startTabRename(tab, label, session);
-          })
-        );
-        if (this.view.sessions.length > 1) {
-          menu.addItem((item) =>
-            item.setTitle("Close").setIcon("x").onClick(() => {
-              this.view.closeSession(session);
-            })
-          );
-        }
-        menu.showAtMouseEvent(e);
-      });
-
-      tabsArea.appendChild(tab);
-    }
-
-    // New session button
-    const newTab = document.createElement("div");
-    newTab.className = "mc-fs-tab-new";
-    newTab.textContent = "+";
-    newTab.addEventListener("click", () => {
-      this.view.createSession();
-      // Re-attach activity callbacks to include the freshly created session
-      this.setupActivityCallbacks();
-    });
-    tabsArea.appendChild(newTab);
-
-    this.tabBarEl.appendChild(tabsArea);
-
-    // Right side: layout switcher + exit
-    const controls = document.createElement("div");
-    controls.className = "mc-fs-controls";
-
-    // Layout switcher
-    const layoutGroup = document.createElement("div");
-    layoutGroup.className = "mc-fs-layout-group";
-
-    const layouts: { key: FullscreenLayout; label: string; svg: string }[] = [
-      { key: "single", label: "Single", svg: '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/></svg>' },
-      { key: "split-h", label: "Side by side", svg: '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/></svg>' },
-      { key: "split-v", label: "Stacked", svg: '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="1" y1="6" x2="11" y2="6"/></svg>' },
-      { key: "grid", label: "Grid 2×2", svg: '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="6" x2="11" y2="6"/></svg>' },
-      { key: "grid-6", label: "Grid 2×3", svg: '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="4.3" x2="11" y2="4.3"/><line x1="1" y1="7.7" x2="11" y2="7.7"/></svg>' },
-      { key: "grid-8", label: "Grid 2×4", svg: '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="3.5" x2="11" y2="3.5"/><line x1="1" y1="6" x2="11" y2="6"/><line x1="1" y1="8.5" x2="11" y2="8.5"/></svg>' },
-      { key: "grid-12", label: "Grid 3×4", svg: '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="10" height="10" rx="1"/><line x1="4" y1="1" x2="4" y2="11"/><line x1="8" y1="1" x2="8" y2="11"/><line x1="1" y1="3.5" x2="11" y2="3.5"/><line x1="1" y1="6" x2="11" y2="6"/><line x1="1" y1="8.5" x2="11" y2="8.5"/></svg>' },
-    ];
-
-    for (const l of layouts) {
-      const btn = document.createElement("button");
-      btn.className = "mc-fs-layout-btn";
-      if (l.key === this.layout) btn.classList.add("is-active");
-      btn.innerHTML = l.svg;
-      btn.title = l.label;
-      btn.addEventListener("click", () => this.setLayout(l.key));
-      layoutGroup.appendChild(btn);
-    }
-    controls.appendChild(layoutGroup);
-
-    // Exit button
-    const exitBtn = document.createElement("button");
-    exitBtn.className = "mc-fs-exit-btn";
-    setIcon(exitBtn, "minimize-2");
-    exitBtn.title = "Exit fullscreen";
-    exitBtn.addEventListener("click", () => this.exit());
-    controls.appendChild(exitBtn);
-
-    this.tabBarEl.appendChild(controls);
-  }
-
-  private startTabRename(tab: HTMLElement, label: HTMLSpanElement, session: TerminalSession) {
-    this.isRenaming = true;
-
-    const input = document.createElement("input");
-    input.type = "text";
-    input.value = session.name;
-    input.className = "mc-fs-tab-rename";
-    input.style.width = `${session.name.length + 1}ch`;
-
-    // Hide buttons while renaming
-    tab.querySelectorAll(".mc-fs-tab-btn").forEach((el) => {
-      (el as HTMLElement).style.display = "none";
-    });
-    label.replaceWith(input);
-
-    input.addEventListener("input", () => {
-      input.style.width = `${input.value.length + 1}ch`;
-    });
-
-    let finished = false;
-    const finish = (save: boolean) => {
-      if (finished) return;
-      finished = true;
-      this.isRenaming = false;
-      if (save) {
-        const name = input.value.trim();
-        if (name) {
-          session.name = name;
-          (session as any)._autoNameLocked = true;
-          if ((session as any)._autoNameInterval) {
-            clearInterval((session as any)._autoNameInterval);
-            (session as any)._autoNameInterval = null;
-          }
-        }
-        if ((session as any)._toolbarNameEl) (session as any)._toolbarNameEl.textContent = name;
-      }
-      this.renderFsTabs();
-      this.view.renderLayout();
-      this.view.renderTabs();
-      this.view.saveState();
-    };
-
-    input.addEventListener("keydown", (e) => {
-      e.stopPropagation();
-      if (e.key === "Enter") finish(true);
-      if (e.key === "Escape") finish(false);
-    });
-    input.addEventListener("blur", () => finish(true));
-
-    input.focus();
-    input.select();
-  }
-
-  private setupActivityCallbacks() {
-    for (const session of this.view.sessions) {
-      session.setActivityCallback((s) => {
-        if (s !== this.focusedSession && !s.hasActivity) {
-          s.hasActivity = true;
-          const tabs = this.tabBarEl?.querySelectorAll('.mc-fs-tab');
-          if (tabs) {
-            const idx = this.view.sessions.indexOf(s);
-            if (idx >= 0 && tabs[idx]) {
-              tabs[idx].classList.add('has-activity');
-            }
-          }
-        }
-      });
-    }
-  }
-
-  private clearActivityCallbacks() {
-    for (const session of this.view.sessions) {
-      session.setActivityCallback(null);
-    }
-  }
-
-  destroy() {
-    if (this.isOpen) {
-      // Restore sidebar before destroying
-      if (this.savedSidebarParent) {
-        const sidebar = this.view.sidebarEl;
-        this.savedSidebarParent.appendChild(sidebar);
-        this.savedSidebarParent = null;
-      }
-      // Quick exit without animation: park sessions, switch view to inline, render
-      for (const s of this.view.sessions) {
-        this.view.parkingEl.appendChild(s.containerEl);
-      }
-      this.resizeObserver?.disconnect();
-      if (this.resizeTimer) clearTimeout(this.resizeTimer);
-      this.overlay?.remove();
-      this.overlay = null;
-      this.tabBarEl = null;
-      this.gridEl = null;
-      FullscreenManager.overlayOpen = false;
-      this.view.displayMode = { kind: "inline", layout: this.view.displayMode.layout };
-      this.view.fs = null;
-      // Don't call renderLayout here — view may be closing too
-    }
   }
 }
 
@@ -1714,7 +1208,20 @@ class TerminalView extends ItemView {
     this.resizeObserver.observe(this.sessionsEl);
 
     // Fullscreen manager
-    this.fullscreenManager = new FullscreenManager(this);
+    this.fullscreenManager = new FullscreenManager(this, {
+      setIcon: (el, iconName) => setIcon(el, iconName),
+      showContextMenu: (items, ev) => {
+        const menu = new Menu();
+        for (const it of items) {
+          menu.addItem((mi) => {
+            mi.setTitle(it.title);
+            if (it.icon) mi.setIcon(it.icon);
+            mi.onClick(it.onClick);
+          });
+        }
+        menu.showAtMouseEvent(ev);
+      },
+    });
 
     // Re-apply terminal theme when Obsidian theme changes
     this.registerEvent(
@@ -2288,14 +1795,34 @@ class TerminalView extends ItemView {
       }
 
       card.addEventListener("click", () => this.switchTo(session));
+      card.dataset.sessionId = String(session.id);
       card.addEventListener("contextmenu", (e) => {
         e.preventDefault();
+        this.isRenaming = true;
         const menu = new Menu();
         menu.addItem((item) =>
+          item.setTitle("Rename").setIcon("pencil").onClick(() => {
+            const freshCard = this.workingEl?.querySelector(`[data-session-id="${session.id}"]`) as HTMLElement;
+            if (freshCard) {
+              this.startSidebarRename(freshCard, session);
+            } else {
+              this.isRenaming = false;
+            }
+          })
+        );
+        menu.addItem((item) =>
           item.setTitle("Close").setIcon("x").onClick(() => {
+            this.isRenaming = false;
             this.closeSession(session);
           })
         );
+        (menu as any).onHide?.(() => {
+          setTimeout(() => {
+            if (this.isRenaming && !this.workingEl?.querySelector(".mc-sidebar-rename-input")) {
+              this.isRenaming = false;
+            }
+          }, 100);
+        });
         menu.showAtMouseEvent(e);
       });
     }
@@ -3073,6 +2600,62 @@ class OnboardingModal extends Modal {
       this.view.saveCustomSkills();
     });
 
+    // --- Connect accounts (Google Workspace) ---
+    contentEl.createEl("h4", { text: "Connect accounts" });
+
+    const gwSection = contentEl.createDiv({ cls: "mc-onboarding-connect-accounts" });
+    const gwRow = gwSection.createDiv({ cls: "mc-onboarding-connect-accounts-row" });
+    const gwLabel = gwRow.createDiv();
+    gwLabel.createEl("strong", { text: "Google Workspace" });
+    gwLabel.createEl("div", {
+      text: "Gmail + Calendar as tools for Claude Code",
+      cls: "mc-onboarding-body",
+    });
+
+    const gwPill = gwRow.createSpan({
+      cls: "mc-connection-pill is-disconnected",
+      text: "Disconnected",
+    });
+
+    const gwPlugin = (this.view as any).plugin as TerminalPlugin | undefined;
+    if (gwPlugin) {
+      // Update pill based on current connection state
+      void gwPlugin.getGoogleStorage().loadTokens().then((tokens: StoredTokens | null) => {
+        if (tokens) {
+          gwPill.textContent = "Connected";
+          gwPill.classList.remove("is-disconnected");
+          gwPill.classList.add("is-connected");
+        }
+      }).catch(() => {
+        // Error loading — leave as disconnected
+      });
+
+      gwRow.addEventListener("click", () => {
+        new ConnectGoogleModal(this.app, {
+          storage: gwPlugin.getGoogleStorage(),
+          quickConnect: {
+            clientId: process.env.GOOGLE_OAUTH_CLIENT_ID || "",
+            clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET || "",
+          },
+          onStateChange: (state) => {
+            if (state.kind === "connected") {
+              gwPill.textContent = "Connected";
+              gwPill.classList.remove("is-disconnected", "is-error");
+              gwPill.classList.add("is-connected");
+            } else if (state.kind === "error") {
+              gwPill.textContent = "Error";
+              gwPill.classList.remove("is-disconnected", "is-connected");
+              gwPill.classList.add("is-error");
+            } else if (state.kind === "disconnected") {
+              gwPill.textContent = "Disconnected";
+              gwPill.classList.remove("is-connected", "is-error");
+              gwPill.classList.add("is-disconnected");
+            }
+          },
+        }).open();
+      });
+    }
+
     // Dashboard guide
     contentEl.createEl("h4", { text: "Dashboard" });
     contentEl.createEl("p", {
@@ -3563,292 +3146,6 @@ const SKILLS: SkillDef[] = [
   { id: "whatsapp-digest", label: "WhatsApp Digest", description: "Analyze WhatsApp groups — action items, blindspots, vault staleness" },
 ];
 
-// --- Agent Tracker ---
-
-const MIN_DWELL_MS = 5000;       // minimum time in any state before transition
-const IDLE_PROMPT_MS = 8000;      // idle + prompt visible → to-review
-const IDLE_SAFETY_MS = 30000;     // idle safety net → to-review regardless
-const REVIVE_BYTES = 200;         // bytes needed to revive from to-review
-const REVIVE_WINDOW_MS = 5000;    // window for revive byte counting
-const AUTO_DETECT_WINDOW_MS = 8000; // window for auto-detect
-
-interface TrackedSession {
-  sessionId: number;
-  skillName: string;
-  startedAt: number;
-  lastActivityAt: number;
-  status: "working" | "to-review" | "dismissed";
-  stateChangedAt: number;
-  recentOutputBytes: number;
-  outputWindowStart: number;
-}
-
-class AgentTracker {
-  tracked: TrackedSession[] = [];
-  private listeners: Map<number, (data: Buffer) => void> = new Map();
-  private exitListeners: Map<number, () => void> = new Map();
-  private onChange: () => void;
-
-  constructor(onChange: () => void) {
-    this.onChange = onChange;
-  }
-
-  // Polling is driven by TerminalView — no internal timer needed
-
-  stop() {
-    this.listeners.clear();
-    this.exitListeners.clear();
-  }
-
-  track(session: TerminalSession, skillName: string) {
-    this.untrack(session);
-
-    const now = Date.now();
-    const entry: TrackedSession = {
-      sessionId: session.id,
-      skillName,
-      startedAt: now,
-      lastActivityAt: now,
-      status: "working",
-      stateChangedAt: now,
-      recentOutputBytes: 0,
-      outputWindowStart: now,
-    };
-    this.tracked.push(entry);
-    this.attachListeners(session, entry);
-    this.onChange();
-  }
-
-  private attachListeners(session: TerminalSession, entry: TrackedSession) {
-    // stdout: accumulate bytes + update activity timestamp (do NOT change state here)
-    const stdoutListener = (data: Buffer) => {
-      const t = this.tracked.find((tr) => tr.sessionId === entry.sessionId);
-      if (!t) return;
-      t.lastActivityAt = Date.now();
-      t.recentOutputBytes += data.length;
-    };
-    session.process.stdout?.on("data", stdoutListener);
-    this.listeners.set(session.id, stdoutListener);
-
-    // process exit: immediate transition to to-review
-    const exitListener = () => {
-      const t = this.tracked.find((tr) => tr.sessionId === entry.sessionId);
-      if (t && t.status === "working") {
-        t.status = "to-review";
-        t.stateChangedAt = Date.now();
-        this.onChange();
-      }
-    };
-    session.process.on("exit", exitListener);
-    this.exitListeners.set(session.id, exitListener);
-  }
-
-  untrack(sessionOrId: TerminalSession | number) {
-    const sessionId = typeof sessionOrId === "number" ? sessionOrId : sessionOrId.id;
-    const session = typeof sessionOrId === "number" ? null : sessionOrId;
-
-    // Actually detach listeners from the process — deleting from the Map
-    // alone left the EventEmitter callbacks attached, so they fired against
-    // a destroyed session and wrote to a disposed terminal.
-    const stdoutListener = this.listeners.get(sessionId);
-    const exitListener = this.exitListeners.get(sessionId);
-    if (session) {
-      try {
-        if (stdoutListener) session.process.stdout?.removeListener("data", stdoutListener);
-      } catch {}
-      try {
-        if (exitListener) session.process.removeListener("exit", exitListener);
-      } catch {}
-    }
-
-    this.tracked = this.tracked.filter((t) => t.sessionId !== sessionId);
-    this.listeners.delete(sessionId);
-    this.exitListeners.delete(sessionId);
-    this.onChange();
-  }
-
-  dismiss(sessionId: number) {
-    const t = this.tracked.find((t) => t.sessionId === sessionId);
-    if (t) {
-      t.status = "dismissed";
-      t.stateChangedAt = Date.now();
-      this.onChange();
-    }
-  }
-
-  getWorking(): TrackedSession[] {
-    return this.tracked.filter((t) => t.status === "working");
-  }
-
-  getToReview(): TrackedSession[] {
-    return this.tracked.filter((t) => t.status === "to-review");
-  }
-
-  /** Read recent non-empty lines from terminal buffer */
-  private getRecentLines(session: TerminalSession, count: number): string[] {
-    const buf = session.terminal.buffer.active;
-    const lines: string[] = [];
-    for (let i = buf.length - 1; i >= Math.max(0, buf.length - 50) && lines.length < count; i--) {
-      const line = buf.getLine(i)?.translateToString(true)?.trim();
-      if (line) lines.push(line);
-    }
-    return lines;
-  }
-
-  /** Check if the terminal shows a bare shell prompt (NOT Claude Code's prompt) */
-  private isShellPrompt(session: TerminalSession): boolean {
-    const lines = this.getRecentLines(session, 5);
-    if (lines.length === 0) return false;
-    const last = lines[0];
-
-    // If Claude Code TUI is visible in recent lines, this is NOT a shell prompt
-    if (this.hasClaudeTuiMarkers(lines)) return false;
-
-    // Common shell prompt endings
-    if (/[$%#]\s*$/.test(last)) return true;
-    // Oh-my-zsh arrow
-    if (/^➜\s/.test(last)) return true;
-    // username@host with prompt char
-    if (/^\S+@\S+[^╭╰]*[$%#]\s*$/.test(last)) return true;
-
-    return false;
-  }
-
-  /** Check if Claude Code output contains a completion marker */
-  private hasClaudeCompletionMarker(lines: string[]): boolean {
-    for (const line of lines) {
-      if (/✻\s*(Cooked for|Done|Completed)/.test(line)) return true;
-      if (/^✻\s/.test(line)) return true;
-    }
-    return false;
-  }
-
-  /** Check if Claude Code TUI markers are present in buffer lines */
-  private hasClaudeTuiMarkers(lines: string[]): boolean {
-    for (const line of lines) {
-      if (/^[╭╰│]/.test(line)) return true;
-      if (/Allow\?\s*\[/.test(line)) return true;
-      if (/Welcome to Claude/.test(line)) return true;
-      if (/^❯\s/.test(line)) return true;
-    }
-    return false;
-  }
-
-  /** Check if the terminal is idle at Claude Code's input prompt (❯).
-   *  This means Claude finished its task and is waiting for the next user message.
-   *  Distinct from "active" — active means Claude is producing output. */
-  private isAtClaudePrompt(session: TerminalSession): boolean {
-    const lines = this.getRecentLines(session, 5);
-    if (lines.length === 0) return false;
-    // Claude Code prompt is ❯ (sometimes with space). Must be the LAST non-empty line.
-    const last = lines[0];
-    if (/^❯\s*$/.test(last)) return true;
-    // Also check for the "tips" line that appears after completion
-    if (/^❯/.test(last) && last.length < 10) return true;
-    return false;
-  }
-
-  /** Check if Claude Code appears active in the terminal buffer */
-  private isClaudeCodeActive(session: TerminalSession): boolean {
-    return this.hasClaudeTuiMarkers(this.getRecentLines(session, 30));
-  }
-
-  /** Single unified poll — called from TerminalView every 5s */
-  pollWithSessions(sessions: TerminalSession[]) {
-    let changed = false;
-    const now = Date.now();
-    const trackedIds = new Set(this.tracked.map((t) => t.sessionId));
-
-    // --- Auto-detect: untracked sessions with Claude TUI visible + recent output ---
-    for (const session of sessions) {
-      if (trackedIds.has(session.id)) continue;
-      if (session._lastStdoutAt === 0 || now - session._lastStdoutAt > AUTO_DETECT_WINDOW_MS) continue;
-      if (!this.isClaudeCodeActive(session)) continue;
-
-      const entry: TrackedSession = {
-        sessionId: session.id,
-        skillName: session.name,
-        startedAt: now,
-        lastActivityAt: now,
-        status: "working",
-        stateChangedAt: now,
-        recentOutputBytes: 0,
-        outputWindowStart: now,
-      };
-      this.tracked.push(entry);
-      trackedIds.add(session.id);
-      this.attachListeners(session, entry);
-      changed = true;
-    }
-
-    // --- State transitions for tracked sessions ---
-    for (const t of this.tracked) {
-      const dwellMs = now - t.stateChangedAt;
-
-      // Reset output byte counter periodically
-      if (now - t.outputWindowStart > REVIVE_WINDOW_MS) {
-        t.recentOutputBytes = 0;
-        t.outputWindowStart = now;
-      }
-
-      if (t.status === "working") {
-        if (dwellMs < MIN_DWELL_MS) continue;
-        const idleMs = now - t.lastActivityAt;
-        const session = sessions.find((s) => s.id === t.sessionId);
-        if (!session) continue;
-
-        // Check completion marker in last 15 lines (buffer scrolls, 3 was too few)
-        if (idleMs > 2000) {
-          const tailLines = this.getRecentLines(session, 15);
-          if (this.hasClaudeCompletionMarker(tailLines)) {
-            t.status = "to-review";
-            t.stateChangedAt = now;
-            t.recentOutputBytes = 0;
-            changed = true;
-            continue;
-          }
-        }
-
-        // Primary: idle at Claude Code prompt (❯) = agent finished, waiting for input
-        if (idleMs > IDLE_PROMPT_MS && this.isAtClaudePrompt(session)) {
-          t.status = "to-review";
-          t.stateChangedAt = now;
-          t.recentOutputBytes = 0;
-          changed = true;
-        }
-        // Secondary: idle at shell prompt = Claude Code exited
-        else if (idleMs > IDLE_PROMPT_MS && this.isShellPrompt(session)) {
-          t.status = "to-review";
-          t.stateChangedAt = now;
-          t.recentOutputBytes = 0;
-          changed = true;
-        }
-        // Safety net: long idle → done regardless
-        else if (idleMs > IDLE_SAFETY_MS) {
-          t.status = "to-review";
-          t.stateChangedAt = now;
-          t.recentOutputBytes = 0;
-          changed = true;
-        }
-      }
-      else if (t.status === "to-review") {
-        if (dwellMs < MIN_DWELL_MS) continue;
-        const session = sessions.find((s) => s.id === t.sessionId);
-        if (!session) continue;
-
-        // Revive: sustained output + Claude TUI visible → back to working
-        if (t.recentOutputBytes > REVIVE_BYTES && this.isClaudeCodeActive(session)) {
-          t.status = "working";
-          t.stateChangedAt = now;
-          t.recentOutputBytes = 0;
-          changed = true;
-        }
-      }
-    }
-
-    if (changed) this.onChange();
-  }
-}
 
 // (KanbanView removed — kanban is now integrated into TerminalView sidebar)
 
@@ -4160,6 +3457,27 @@ class SkillRegistry {
 export default class TerminalPlugin extends Plugin {
   agentTracker!: AgentTracker;
   skillRegistry!: SkillRegistry;
+  googleStorage: TokenStorageMethod | null = null;
+  googleRefreshTimer: RefreshTimerHandle | null = null;
+
+  getGoogleOAuthConfig(): OAuthConfig {
+    return {
+      clientId: process.env.GOOGLE_OAUTH_CLIENT_ID || "",
+      clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET || "",
+      scopes: [...GOOGLE_WORKSPACE_SCOPES],
+      mode: "quick-connect",
+    };
+  }
+
+  getGoogleStorage(): TokenStorageMethod {
+    if (!this.googleStorage) {
+      const vaultRoot = (this.app.vault.adapter as any).basePath as string;
+      const vaultId = (this.app as any).appId ?? "default";
+      this.googleStorage = createStorageMethod({ vaultRoot, vaultId });
+    }
+    return this.googleStorage;
+  }
+
   async onload() {
     // Ensure pty-helper.py exists in the plugin directory.
     // BRAT and Obsidian's plugin installer only copy main.js, manifest.json,
@@ -4169,7 +3487,7 @@ export default class TerminalPlugin extends Plugin {
     const vaultBase = (this.app.vault.adapter as any).basePath as string;
     const helperPath = path.join(vaultBase, this.manifest.dir, "pty-helper.py");
     try {
-      fs.writeFileSync(helperPath, PTY_HELPER_PY, { mode: 0o755 });
+      fs.writeFileSync(helperPath, PTY_HELPER_SOURCE, { mode: 0o755 });
       ptyHelperPath = helperPath;
     } catch (e) {
       console.error("[modular-context] Failed to write pty-helper.py:", e);
@@ -4314,6 +3632,82 @@ export default class TerminalPlugin extends Plugin {
       callback: () => new ShortcutsModal(this.app).open(),
     });
 
+    // --- Google Workspace commands ---
+
+    const openConnectGoogle = () => {
+      new ConnectGoogleModal(this.app, {
+        storage: this.getGoogleStorage(),
+        quickConnect: {
+          clientId: process.env.GOOGLE_OAUTH_CLIENT_ID || "",
+          clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET || "",
+        },
+      }).open();
+    };
+
+    this.addCommand({
+      id: "google-workspace-connect",
+      name: "Google Workspace: Connect",
+      callback: openConnectGoogle,
+    });
+
+    this.addCommand({
+      id: "google-workspace-disconnect",
+      name: "Google Workspace: Disconnect",
+      callback: async () => {
+        await this.getGoogleStorage().clearTokens().catch((e: unknown) => {
+          console.error("[mc] Google disconnect failed:", e);
+        });
+        new Notice("Google Workspace disconnected");
+      },
+    });
+
+    this.addCommand({
+      id: "google-workspace-reconnect",
+      name: "Google Workspace: Reconnect",
+      callback: async () => {
+        await this.getGoogleStorage().clearTokens().catch(() => undefined);
+        openConnectGoogle();
+      },
+    });
+
+    this.addCommand({
+      id: "google-workspace-status",
+      name: "Google Workspace: Status",
+      callback: async () => {
+        const tokens = await this.getGoogleStorage().loadTokens().catch(() => null);
+        if (!tokens) {
+          new Notice("Google Workspace: not connected");
+          return;
+        }
+        const remainingMin = Math.max(0, Math.floor((tokens.expiresAt - Date.now()) / 60000));
+        new Notice(`Google Workspace: connected as ${tokens.accountEmail} (expires in ~${remainingMin} min)`);
+      },
+    });
+
+    // Start Google token refresh timer (no-op if not connected)
+    this.googleRefreshTimer = startRefreshTimer({
+      storage: this.getGoogleStorage(),
+      config: this.getGoogleOAuthConfig(),
+    });
+
+    // Startup refresh check — if tokens expired, attempt refresh once immediately
+    void this.getGoogleStorage().loadTokens().then(async (tokens: StoredTokens | null) => {
+      if (!tokens) return;
+      if (tokens.expiresAt < Date.now()) {
+        // Tokens expired — refresh timer will attempt on next tick, but try now too
+        const { getValidAccessToken } = await import("./src/google/tokens/refresh");
+        const valid = await getValidAccessToken({
+          storage: this.getGoogleStorage(),
+          config: this.getGoogleOAuthConfig(),
+        }).catch(() => null);
+        if (!valid) {
+          new Notice("Google Workspace session expired. Run 'Google Workspace: Reconnect' to refresh.");
+        }
+      }
+    }).catch(() => {
+      // Corrupted/missing tokens — let modal handle on user open
+    });
+
     // Ensure terminal leaf exists in the right sidebar on startup
     this.app.workspace.onLayoutReady(async () => {
       await this.ensureLeaf();
@@ -4378,6 +3772,8 @@ export default class TerminalPlugin extends Plugin {
 
   async onunload() {
     this.agentTracker.stop();
+    this.googleRefreshTimer?.cancel();
+    this.googleRefreshTimer = null;
     this.app.workspace.detachLeavesOfType(VIEW_TYPE);
   }
 }

@@ -1,0 +1,45 @@
+/* @mc/shared — portable styles (deferred to Iter 14).
+ *
+ * For MVP Electron app, these CSS rules will be curated from
+ * packages/plugin/styles.css by the app build step. Specifically:
+ * - .mc-terminal-* (base terminal chrome)
+ * - .mc-session-* (session panes, tabs)
+ * - .mc-fullscreen-* (fullscreen overlay)
+ * - .mc-bookmark-* (bookmark gutter + pips)
+ * - .mc-pane-* (grid layouts)
+ * - .mc-glyph-* (session glyphs)
+ * - .mc-agent-* (agent state indicators)
+ *
+ * Obsidian-specific classes stay in packages/plugin/styles.css:
+ * - .mc-sidebar-* (Obsidian layout integration)
+ * - .mc-file-overlay* (FileOverlay, uses MarkdownRenderer)
+ *
+ * The app will @import "@mc/shared/styles.css" in its main CSS entry. */
+
+/* Reset + base for terminal panes — minimal starter set.
+ * App-side full styles will be curated in Iter 14. */
+
+.mc-terminal-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--mc-bg, #0d0d0d);
+  color: var(--mc-fg, #e0e0e0);
+}
+
+.mc-terminal-session {
+  flex: 1;
+  min-height: 0;
+  display: none;
+  position: relative;
+}
+
+.mc-terminal-session.is-active {
+  display: flex;
+  flex-direction: column;
+}
+
+.mc-terminal-session .xterm {
+  flex: 1;
+  min-height: 0;
+}

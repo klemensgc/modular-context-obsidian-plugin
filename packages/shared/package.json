@@ -1,0 +1,11 @@
+{
+  "name": "@mc/shared",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Portable modules shared between Obsidian plugin and standalone Electron app",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit"
+  }
+}
