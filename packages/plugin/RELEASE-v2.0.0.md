@@ -87,7 +87,7 @@ See [CHANGELOG.md](CHANGELOG.md) for complete details.
 - **ADR-003 + addendum** — MCP stdio transport + plaintext credentials sidecar (follows `gcloud`/`aws` CLI industry pattern).
 - **ADR-005** — Multi-account storage: per-account folder + index, `emailToAccountFilename()` naming.
 
-Full ADRs in repo under `_workspace/2026-04/w3/google-workspace/adrs/`.
+Full ADRs in repo under [`docs/adrs/`](../../docs/adrs/).
 
 ---
 

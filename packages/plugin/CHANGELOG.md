@@ -1,6 +1,6 @@
 # Changelog
 
-## v2.0.0 (unreleased) — Modular Context | Karpathy LLM Knowledge Base + Gmail & G-Cal
+## v2.0.0 — 2026-04-18 — Modular Context | Karpathy LLM Knowledge Base + Gmail & G-Cal
 
 First stable release. Graduates v1.5 / v1.6 / v1.7 beta milestones into one production-ready bundle. New positioning: your Obsidian vault as LLM-native knowledge base + multi-account G-Suite MCP server for Claude Code.
 
@@ -209,7 +209,7 @@ First release of Google Workspace integration foundation. OAuth flow + encrypted
 - CSS: ~270 lines of `mc-connect-google-*`, `mc-connection-state-*`, `mc-byo-section` classes
 
 ### Required post-release (user actions)
-- Create Google Cloud OAuth client (type: Desktop app) — see Foundation pack `_workspace/2026-04/w3/google-workspace/adrs/ADR-001-oauth-strategy.md`
+- Create Google Cloud OAuth client (type: Desktop app) — see [docs/adrs/ADR-001-oauth-strategy.md](../../docs/adrs/ADR-001-oauth-strategy.md)
 - Copy Client ID + Secret into `packages/plugin/.env.local` (gitignored)
 - Rebuild: `cd packages/plugin && npm run build`
 - Copy `main.js`, `manifest.json`, `styles.css` to `.obsidian/plugins/modular-context/`

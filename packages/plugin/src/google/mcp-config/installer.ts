@@ -5,7 +5,7 @@ import { chmodSync, copyFileSync, existsSync, readFileSync, writeFileSync } from
 import { dirname, join } from "node:path";
 import { DIST_DIR, SERVER_ENTRY, ensureSidecarDirs } from "./credentials-sidecar.js";
 
-const REQUIRED_SERVER_VERSION = "1.0.0-beta.1";
+const REQUIRED_SERVER_VERSION = "1.1.0";
 const VERSION_FILE = join(DIST_DIR, "VERSION");
 
 /**

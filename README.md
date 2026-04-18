@@ -59,11 +59,11 @@ One install, one onboarding, two productivity frontiers.
                                (infra · OAuth · sidecar)
 ```
 
-**Architecture decisions** (ADRs in `_workspace/2026-04/w3/google-workspace/adrs/`):
-- ADR-001 — Hybrid OAuth: Quick Connect (shared client) + BYO (user-provided client)
-- ADR-002 — Electron `safeStorage` token storage (OS keychain)
-- ADR-003 + addendum — MCP server stdio lifecycle + plaintext credentials sidecar
-- ADR-005 — Multi-account storage model (per-account folder + index)
+**Architecture decisions** ([full ADRs in `docs/adrs/`](docs/adrs/)):
+- [ADR-001](docs/adrs/ADR-001-oauth-strategy.md) — Hybrid OAuth: Quick Connect (shared client) + BYO (user-provided client)
+- [ADR-002](docs/adrs/ADR-002-token-storage.md) — Electron `safeStorage` token storage (OS keychain)
+- [ADR-003](docs/adrs/ADR-003-mcp-server-lifecycle.md) + [addendum](docs/adrs/ADR-003-addendum-shared-state.md) — MCP server stdio lifecycle + plaintext credentials sidecar
+- [ADR-005](docs/adrs/ADR-005-multi-account-storage.md) — Multi-account storage model (per-account folder + index)
 
 ---
 
@@ -234,7 +234,7 @@ Plus 5+ non-Google commands for terminal / skill management. See Command Palette
 - **Logs** scrub tokens, emails, subjects via regex on every line.
 - **Multi-account isolation.** Each account has separate credentials; MCP server honors `account` param strictly.
 
-Full threat model in `ADR-003-addendum-shared-state.md`.
+Full threat model in [docs/adrs/ADR-003-addendum-shared-state.md](docs/adrs/ADR-003-addendum-shared-state.md).
 
 ---
 
