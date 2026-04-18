@@ -159,6 +159,30 @@ Requires Obsidian ≥ 0.15 and macOS (Linux + Windows may work; untested).
 
 ---
 
+## Repo structure
+
+Monorepo with three packages:
+
+```
+modular-context-obsidian-plugin/
+├── packages/
+│   ├── plugin/        ← Obsidian plugin (main.ts, manifest, features + MCP client glue)
+│   ├── mcp-google/    ← standalone MCP server (Gmail + Calendar tools, 10 tools, Node)
+│   ├── shared/        ← portable types + AgentTracker + PTY helper + UI primitives
+│   └── app/           ← experimental standalone Electron app (WIP, not shipped)
+├── README.md          ← you are here
+├── banner.png
+└── package.json       ← monorepo scripts (build:shared → build:mcp-google → build:plugin)
+```
+
+- **[packages/plugin/CHANGELOG.md](packages/plugin/CHANGELOG.md)** — user-facing release notes (v1.0 → v2.0)
+- **[packages/plugin/RELEASE-v2.0.0.md](packages/plugin/RELEASE-v2.0.0.md)** — v2.0 release highlights
+- **[packages/mcp-google/README.md](packages/mcp-google/README.md)** — MCP server docs (10 tools, accounts, env contract)
+- **[packages/mcp-google/CHANGELOG.md](packages/mcp-google/CHANGELOG.md)** — MCP server version history
+- Skill library: separate repo [klemensgc/modular-context-skills](https://github.com/klemensgc/modular-context-skills) — plugin auto-syncs
+
+---
+
 ## Connect Google Workspace (6 steps)
 
 1. **Create GCP OAuth Client**
@@ -224,7 +248,7 @@ Full threat model in `ADR-003-addendum-shared-state.md`.
 - New tools: `gmail_send`, `gmail_modify_labels`, `calendar_list_calendars`, `calendar_update_event`, `calendar_delete_event`, `calendar_freebusy`
 - **Smart Session Restore Picker** — replaces silent auto-resume on plugin reopen. Modal classifies saved sessions into Needs attention / Idle / Archive buckets; you pick what materializes. No accidental skill re-runs, no hidden respawns.
 
-Full list in [CHANGELOG.md](CHANGELOG.md).
+Full list in [packages/plugin/CHANGELOG.md](packages/plugin/CHANGELOG.md).
 
 ---
 
