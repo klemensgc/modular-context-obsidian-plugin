@@ -10,7 +10,8 @@
     "build:plugin": "npm --workspace packages/plugin run build",
     "build:app": "npm --workspace packages/app run build",
     "build:shared": "npm --workspace packages/shared run build",
-    "build": "npm run build:shared && npm run build:plugin && npm run build:app",
+    "build:mcp-google": "npm --workspace packages/mcp-google run build",
+    "build": "npm run build:shared && npm run build:mcp-google && npm run build:plugin && npm run build:app",
     "dev:app": "npm --workspace packages/app run dev"
   },
   "devDependencies": {
