@@ -220,7 +220,14 @@ modular-context-obsidian-plugin/
 
 ---
 
-## Connect Google Workspace (6 steps)
+## Connect Google Workspace
+
+Two paths:
+
+- **Quick Connect** (no GCP setup) — use the shared OAuth client bundled with the pre-built release. Comment your email on [#3 — Quick Connect: request test-user access](https://github.com/klemensgc/modular-context-obsidian-plugin/issues/3) to be added as a test user (usually within 24h). Then skip to step 5 below.
+- **BYO** (your own GCP project) — full control, no test-user limit. Follow all 6 steps below.
+
+### 6 steps (BYO path)
 
 1. **Create GCP OAuth Client**
    - [Google Cloud Console](https://console.cloud.google.com) → new project (e.g. `modular-context-gcp`)
