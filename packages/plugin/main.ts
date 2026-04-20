@@ -3303,8 +3303,15 @@ class OnboardingModal extends Modal {
     gwPlugin: TerminalPlugin,
     host: HTMLElement,
   ): void {
+    const storage = gwPlugin.getGoogleStorage() as any;
+    const multi = typeof storage.getMulti === "function" ? storage.getMulti() : null;
+    if (!multi) {
+      new Notice("Google Workspace: multi-account storage unavailable");
+      return;
+    }
     new ConnectGoogleModal(this.app, {
-      storage: gwPlugin.getGoogleStorage(),
+      storage,
+      multiStorage: multi,
       quickConnect: {
         clientId: process.env.GOOGLE_OAUTH_CLIENT_ID || "",
         clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET || "",
@@ -4440,8 +4447,15 @@ export default class TerminalPlugin extends Plugin {
     // --- Google Workspace commands ---
 
     const openConnectGoogle = () => {
+      const storage = this.getGoogleStorage() as any;
+      const multi = typeof storage.getMulti === "function" ? storage.getMulti() : null;
+      if (!multi) {
+        new Notice("Google Workspace: multi-account storage unavailable");
+        return;
+      }
       new ConnectGoogleModal(this.app, {
-        storage: this.getGoogleStorage(),
+        storage,
+        multiStorage: multi,
         quickConnect: {
           clientId: process.env.GOOGLE_OAUTH_CLIENT_ID || "",
           clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET || "",

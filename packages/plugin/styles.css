@@ -2933,6 +2933,141 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
   margin-top: 4px;
 }
 
+/* Account list (multi-account modal) */
+.mc-account-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 16px 0 12px;
+}
+
+.mc-account-list-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  transition: border-color 120ms ease;
+}
+
+.mc-account-list-item.is-primary {
+  border-color: var(--interactive-accent);
+  background: var(--background-secondary-alt, var(--background-secondary));
+}
+
+.mc-account-list-avatar {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--background-primary);
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.mc-account-list-avatar svg {
+  width: 18px;
+  height: 18px;
+}
+
+.mc-account-list-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mc-account-list-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mc-account-list-email {
+  font-weight: 500;
+  color: var(--text-normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mc-account-primary-badge {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #EB670F;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.mc-account-list-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.mc-account-expires {
+  color: var(--text-muted);
+}
+
+.mc-account-actions-inline {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.mc-account-action-btn {
+  font-size: 12px;
+  padding: 5px 10px;
+  white-space: nowrap;
+}
+
+.mc-account-action-btn.is-destructive {
+  color: var(--text-error, #c0392b);
+}
+
+.mc-account-action-btn.is-destructive:hover {
+  background: var(--background-modifier-error, rgba(192, 57, 43, 0.1));
+}
+
+.mc-add-another-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 10px 14px;
+  margin-top: 4px;
+  background: transparent;
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.mc-add-another-btn:hover {
+  border-color: var(--interactive-accent);
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.mc-account-list-warn {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 6px 8px;
+  background: var(--background-modifier-hover);
+  border-radius: 4px;
+  text-align: center;
+}
+
 /* Trust messaging */
 .mc-trust-message {
   margin-top: 20px;
@@ -3133,6 +3268,23 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
 
 .mc-oauth-button-google-label {
   line-height: 1;
+}
+
+.mc-quick-connect-hint {
+  margin: 10px 0 14px 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  text-align: center;
+}
+
+.mc-quick-connect-hint a {
+  color: var(--interactive-accent);
+  text-decoration: none;
+}
+
+.mc-quick-connect-hint a:hover {
+  text-decoration: underline;
 }
 
 /* --- RestorePickerModal --- */
