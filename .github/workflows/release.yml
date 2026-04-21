@@ -23,6 +23,15 @@ jobs:
 
             - run: npm ci
 
+            - name: Write .env.local so esbuild bakes Quick Connect creds into main.js
+              working-directory: packages/plugin
+              env:
+                  GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+                  GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+              run: |
+                  printf 'GOOGLE_OAUTH_CLIENT_ID=%s\nGOOGLE_OAUTH_CLIENT_SECRET=%s\n' \
+                    "$GOOGLE_OAUTH_CLIENT_ID" "$GOOGLE_OAUTH_CLIENT_SECRET" > .env.local
+
             - name: Build all packages (builds mcp-google first, then plugin copies mcp-server.js)
               run: npm run build
 
