@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/klemensgc-modular-context-obsidian-plugin-badge.png)](https://mseep.ai/app/klemensgc-modular-context-obsidian-plugin)
+
 # Modular Context | Karpathy LLM Knowledge Base + Gmail & G-Cal
 
 ![banner](banner.png)
