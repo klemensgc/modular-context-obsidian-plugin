@@ -49,11 +49,13 @@ One install, one onboarding, two productivity frontiers.
            │   🦀  mcp-google   (stdio · Node)        │
            └───────────┬──────────────────────┬───────┘
                        ▼                      ▼
-                    🦀  GOOGLE WORKSPACE (multi-account)
-                    ├─ Gmail   ✓    ← read   → send/draft/label
-                    ├─ GCal    ✓    ← list   → create/update/delete
-                    ├─ Docs    ⋯  coming soon
-                    └─ Drive   ⋯  coming soon
+                    🦀  GOOGLE WORKSPACE (multi-account · 25 tools)
+                    ├─ Gmail    ✓ 4   ← search → send/draft/labels
+                    ├─ GCal     ✓ 6   ← list   → create/update/delete/freebusy
+                    ├─ Drive    ✓ 4   ← list/search → download/upload
+                    ├─ Docs     ✓ 3   ← read   → create/update
+                    ├─ Sheets   ✓ 5   ← read   → write/append/create
+                    └─ Slides   ✓ 3   ← read   → create/add-slide
 
         ── configured by ──▶  🦀  Modular Context Plugin
                                (infra · OAuth · sidecar)
