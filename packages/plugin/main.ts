@@ -1,6 +1,7 @@
 import { Plugin, ItemView, WorkspaceLeaf, App, TFile, setIcon, SuggestModal, Modal, Menu, addIcon, Setting, PluginSettingTab, Notice, requestUrl, MarkdownRenderer, Component } from "obsidian";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { WebglAddon } from "@xterm/addon-webgl";
 import type { ChildProcess } from "child_process";
 import {
   SESSION_GLYPHS,
@@ -638,6 +639,17 @@ class TerminalSession {
     this.fitAddon = new FitAddon();
     this.terminal.loadAddon(this.fitAddon);
     this.terminal.open(this.containerEl);
+
+    // WebGL renderer — eliminates DOM-renderer scroll artefacts (residual chars,
+    // colour bleed). Falls back silently to default DOM renderer if WebGL2 is
+    // unavailable or the GPU context is lost.
+    try {
+      const webgl = new WebglAddon();
+      webgl.onContextLoss(() => webgl.dispose());
+      this.terminal.loadAddon(webgl);
+    } catch (e) {
+      console.warn("[modular-context] WebGL renderer unavailable, falling back to DOM:", e);
+    }
 
     // Grab the hidden textarea xterm.js creates for input
     this.textareaEl = this.containerEl.querySelector(".xterm-helper-textarea");

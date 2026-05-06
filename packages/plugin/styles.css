@@ -316,7 +316,7 @@
 .mc-terminal-session {
   position: absolute;
   inset: 0;
-  padding: 0 6px 14px 12px;
+  padding: 0 6px 0 12px;
   display: none;
   flex-direction: column;
   background: var(--background-primary);
