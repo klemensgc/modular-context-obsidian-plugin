@@ -3287,6 +3287,14 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
   text-decoration: underline;
 }
 
+.mc-quick-connect-request-btn {
+  display: block;
+  width: 100%;
+  margin: 0 0 10px 0;
+  text-align: center;
+  box-sizing: border-box;
+}
+
 /* --- RestorePickerModal --- */
 
 .mc-restore-picker-modal {

@@ -90,7 +90,7 @@ export async function startOAuthFlow(config: OAuthConfig): Promise<StoredTokens>
   const challenge = challengeFromVerifier(verifier);
   const state = randomBytes(16).toString("hex");
 
-  const server = await startLoopbackServer();
+  const server = await startLoopbackServer(config.mode === "quick-connect");
   try {
     const redirectUri = `http://127.0.0.1:${server.port}/callback`;
     const authUrl = new URL(AUTH_URL);

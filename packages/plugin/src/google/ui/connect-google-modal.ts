@@ -11,6 +11,7 @@ import type {
   TokenStorageMethod,
 } from "@mc/shared";
 import { GOOGLE_WORKSPACE_SCOPES, normalizeAccountId } from "@mc/shared";
+import { QUICK_CONNECT_TEST_USER_ISSUE_URL } from "../constants";
 import { startOAuthFlow, TokenExchangeError } from "../oauth/flow";
 import { OAuthDeniedError, OAuthTimeoutError } from "../oauth/loopback-server";
 import { EncryptionUnavailableError, TamperedDataError } from "../tokens/storage";
@@ -22,7 +23,7 @@ export type ConnectGoogleState =
   | { kind: "connecting"; addingAnother: boolean }
   | { kind: "connected"; tokens: StoredTokens }
   | { kind: "disconnected" }
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string; needsTestUserAccess?: boolean };
 
 export interface ConnectGoogleModalOptions {
   /** Legacy single-account API — kept for back-compat callers (not used internally). */
@@ -138,7 +139,11 @@ export class ConnectGoogleModal extends Modal {
         this.renderConnecting(contentEl, this.state.addingAnother);
         break;
       case "error":
-        this.renderError(contentEl, this.state.message);
+        this.renderError(
+          contentEl,
+          this.state.message,
+          this.state.needsTestUserAccess,
+        );
         break;
       // Legacy states retained in type for onStateChange consumers; no render path.
       case "connected":
@@ -190,17 +195,7 @@ export class ConnectGoogleModal extends Modal {
         void this.handleConnect(false);
       });
 
-      const hint = container.createDiv({ cls: "mc-quick-connect-hint" });
-      hint.createSpan({
-        text: "Getting \"Error 403: access_denied\"? Comment your email at ",
-      });
-      const link = hint.createEl("a", {
-        text: "issue #3",
-        href: "https://github.com/klemensgc/modular-context-obsidian-plugin/issues/3",
-      });
-      link.setAttr("target", "_blank");
-      link.setAttr("rel", "noopener");
-      hint.createSpan({ text: " to be added as a test user." });
+      appendQuickConnectTestUserHint(container);
     } else {
       const notice = container.createDiv({ cls: "mc-connect-google-notice" });
       notice.createEl("p", {
@@ -300,6 +295,12 @@ export class ConnectGoogleModal extends Modal {
       });
     }
 
+    const hasQuickConnect =
+      this.options.quickConnect.clientId && this.options.quickConnect.clientSecret;
+    if (hasQuickConnect) {
+      appendQuickConnectTestUserHint(wrapper);
+    }
+
     const addBtn = wrapper.createEl("button", {
       cls: "mc-add-another-btn",
       text: "+ Add another account",
@@ -326,13 +327,28 @@ export class ConnectGoogleModal extends Modal {
     });
   }
 
-  private renderError(container: HTMLElement, message: string): void {
+  private renderError(
+    container: HTMLElement,
+    message: string,
+    needsTestUserAccess = false,
+  ): void {
     const wrapper = container.createDiv({
       cls: "mc-connection-state mc-connection-state-error",
     });
     wrapper.createDiv({ cls: "mc-connection-icon", text: "⚠" });
     wrapper.createEl("h3", { text: "Connection failed" });
-    wrapper.createEl("p", { text: message });
+    wrapper.createEl("p", { text: message, cls: "mc-connect-google-body" });
+
+    if (needsTestUserAccess) {
+      appendQuickConnectTestUserHint(container);
+      const requestBtn = container.createEl("button", {
+        text: "Request test-user access on GitHub",
+        cls: "mc-oauth-button-secondary mc-quick-connect-request-btn",
+      });
+      requestBtn.addEventListener("click", () => {
+        void openQuickConnectIssue();
+      });
+    }
 
     const retryBtn = container.createEl("button", {
       text: "Try again",
@@ -378,8 +394,9 @@ export class ConnectGoogleModal extends Modal {
       new Notice(`Connected to Google Workspace as ${tokens.accountEmail}`);
       await this.refreshFromStorage();
     } catch (err) {
-      const message = friendlyError(err);
-      this.setState({ kind: "error", message });
+      const quickConnect = config.mode === "quick-connect";
+      const { message, needsTestUserAccess } = friendlyError(err, quickConnect);
+      this.setState({ kind: "error", message, needsTestUserAccess });
     }
   }
 
@@ -392,7 +409,7 @@ export class ConnectGoogleModal extends Modal {
       new Notice("Primary account updated");
       await this.refreshFromStorage();
     } catch (err) {
-      this.setState({ kind: "error", message: friendlyError(err) });
+      this.setState({ kind: "error", message: friendlyError(err, false).message });
     }
   }
 
@@ -414,7 +431,7 @@ export class ConnectGoogleModal extends Modal {
       }
       await this.refreshFromStorage();
     } catch (err) {
-      this.setState({ kind: "error", message: friendlyError(err) });
+      this.setState({ kind: "error", message: friendlyError(err, false).message });
     }
   }
 
@@ -438,39 +455,83 @@ function shortScope(scope: string): string {
   return parts[parts.length - 1];
 }
 
-function friendlyError(err: unknown): string {
+interface FriendlyError {
+  message: string;
+  needsTestUserAccess?: boolean;
+}
+
+function friendlyError(err: unknown, quickConnect: boolean): FriendlyError {
   if (err instanceof OAuthDeniedError) {
     if (err.googleError === "access_denied") {
-      return (
-        "Google blocked this account (\"Error 403: access_denied\"). " +
-        "The shared Quick Connect client is in Testing mode — your email " +
-        "must be on the test-users list. Comment your email at " +
-        "https://github.com/klemensgc/modular-context-obsidian-plugin/issues/3 " +
-        "to be added."
-      );
+      if (quickConnect) {
+        return {
+          needsTestUserAccess: true,
+          message:
+            "Google blocked this account (\"Error 403: access_denied\"). " +
+            "The shared Quick Connect client is in Testing mode — your Google " +
+            "account email must be on the maintainer's test-users list before OAuth succeeds.",
+        };
+      }
+      return {
+        message:
+          "Google blocked this account (\"Error 403: access_denied\"). " +
+          "Add your Google account as a test user on your OAuth consent screen " +
+          "in Google Cloud Console, then try again.",
+      };
     }
-    return "You denied consent in the browser. Try again and approve the requested scopes.";
+    return {
+      message:
+        "You denied consent in the browser. Try again and approve the requested scopes.",
+    };
   }
   if (err instanceof OAuthTimeoutError) {
-    return (
-      "Browser authorization timed out (2 min). If you saw \"Access blocked\" / " +
-      "\"Error 403: access_denied\", the shared Quick Connect client is in " +
-      "Testing mode — comment your email at " +
-      "https://github.com/klemensgc/modular-context-obsidian-plugin/issues/3 " +
-      "to be added as a test user. Otherwise just try again."
-    );
+    return {
+      needsTestUserAccess: quickConnect,
+      message: quickConnect
+        ? "Browser authorization timed out (2 min). If Google showed \"Access blocked\" " +
+          "or \"Error 403: access_denied\", request test-user access below. Otherwise try again."
+        : "Browser authorization timed out (2 min). Complete approval in the browser and try again.",
+    };
   }
   if (err instanceof TokenExchangeError) {
-    return `Token exchange failed. ${err.message}`;
+    return { message: `Token exchange failed. ${err.message}` };
   }
   if (err instanceof EncryptionUnavailableError) {
-    return err.message;
+    return { message: err.message };
   }
   if (err instanceof TamperedDataError) {
-    return err.message;
+    return { message: err.message };
   }
   if (err instanceof Error) {
-    return err.message;
+    return { message: err.message };
   }
-  return String(err);
+  return { message: String(err) };
+}
+
+function appendQuickConnectTestUserHint(container: HTMLElement): void {
+  const hint = container.createDiv({ cls: "mc-quick-connect-hint" });
+  hint.createSpan({
+    text: "Getting \"Error 403: access_denied\"? Comment your Google account email on ",
+  });
+  const link = hint.createEl("a", {
+    text: "issue #3",
+    href: QUICK_CONNECT_TEST_USER_ISSUE_URL,
+  });
+  link.setAttr("target", "_blank");
+  link.setAttr("rel", "noopener");
+  hint.createSpan({ text: " to be added as a test user (usually within 24h)." });
+}
+
+async function openQuickConnectIssue(): Promise<void> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const electron = require("electron");
+    if (electron?.shell?.openExternal) {
+      await electron.shell.openExternal(QUICK_CONNECT_TEST_USER_ISSUE_URL);
+      return;
+    }
+  } catch {
+    // Fall through
+  }
+  window.open(QUICK_CONNECT_TEST_USER_ISSUE_URL, "_blank");
 }

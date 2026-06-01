@@ -3,6 +3,7 @@
 // Per ADR-001 and research/01-oauth-desktop-flow.md.
 
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
+import { QUICK_CONNECT_TEST_USER_ISSUE_URL } from "../constants";
 
 const CALLBACK_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
 
@@ -57,7 +58,15 @@ p { color: #555; font-size: 14px; margin: 0; line-height: 1.5; }
 </body>
 </html>`;
 
-const ERROR_HTML_TEMPLATE = (msg: string): string => `<!DOCTYPE html>
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+const ERROR_HTML_TEMPLATE = (msg: string, extraHtml = ""): string => `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -68,18 +77,38 @@ body { font-family: -apple-system, system-ui, sans-serif; margin: 0; padding: 60
 .x { color: #dc2626; font-size: 56px; margin-bottom: 16px; }
 h1 { font-size: 22px; margin: 0 0 8px; }
 p { color: #555; font-size: 14px; margin: 0; line-height: 1.5; }
+.hint { margin-top: 16px; font-size: 13px; color: #666; }
+.hint a { color: #1976d2; text-decoration: none; }
+.hint a:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
 <div class="card">
   <div class="x">✗</div>
   <h1>Connection failed</h1>
-  <p>${msg}. You can close this tab and retry in Obsidian.</p>
+  <p>${escapeHtml(msg)}. You can close this tab and retry in Obsidian.</p>
+  ${extraHtml}
 </div>
 </body>
 </html>`;
 
-export async function startLoopbackServer(): Promise<LoopbackServer> {
+const ACCESS_DENIED_QUICK_CONNECT_HTML = `<p class="hint">Quick Connect is in Google Testing mode. Comment your Google account email on <a href="${QUICK_CONNECT_TEST_USER_ISSUE_URL}" target="_blank" rel="noopener">issue #3</a> to be added as a test user.</p>`;
+
+const ACCESS_DENIED_BYO_HTML = `<p class="hint">Add this Google account as a test user on your OAuth consent screen in Google Cloud Console, then try again.</p>`;
+
+function oauthErrorPage(googleError: string, quickConnect: boolean): string {
+  if (googleError === "access_denied") {
+    return ERROR_HTML_TEMPLATE(
+      quickConnect
+        ? "OAuth denied (access_denied) — your account is not on the Quick Connect test-users list yet"
+        : "OAuth denied (access_denied) — add this account as a test user in your GCP project",
+      quickConnect ? ACCESS_DENIED_QUICK_CONNECT_HTML : ACCESS_DENIED_BYO_HTML,
+    );
+  }
+  return ERROR_HTML_TEMPLATE(`OAuth denied (${googleError})`);
+}
+
+export async function startLoopbackServer(quickConnect = true): Promise<LoopbackServer> {
   let resolveCode: ((code: string) => void) | null = null;
   let rejectCode: ((err: Error) => void) | null = null;
   let expectedState: string | null = null;
@@ -104,7 +133,7 @@ export async function startLoopbackServer(): Promise<LoopbackServer> {
     if (error) {
       res.statusCode = 400;
       res.setHeader("Content-Type", "text/html; charset=utf-8");
-      res.end(ERROR_HTML_TEMPLATE(`OAuth denied (${error})`));
+      res.end(oauthErrorPage(error, quickConnect));
       if (rejectCode) rejectCode(new OAuthDeniedError(error));
       return;
     }
