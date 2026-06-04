@@ -1,20 +1,20 @@
 {
-  "name": "modular-context-monorepo",
-  "version": "0.0.0",
+  "name": "modular-context",
+  "version": "2.1.2",
   "private": true,
-  "description": "Monorepo: Obsidian plugin + standalone Electron app sharing portable terminal/agent/UI modules",
+  "description": "Obsidian plugin + MCP server for LLM knowledge base and Google Workspace integration",
   "workspaces": [
-    "packages/*"
+    "packages/shared",
+    "packages/plugin",
+    "packages/mcp-google"
   ],
   "scripts": {
-    "build:plugin": "npm --workspace packages/plugin run build",
-    "build:app": "npm --workspace packages/app run build",
-    "build:shared": "npm --workspace packages/shared run build",
-    "build:mcp-google": "npm --workspace packages/mcp-google run build",
-    "build": "npm run build:shared && npm run build:mcp-google && npm run build:plugin && npm run build:app",
-    "dev:app": "npm --workspace packages/app run dev"
+    "build": "npm run build --workspaces --if-present",
+    "test": "echo \"No tests specified\" && exit 0",
+    "lint": "eslint packages/**/src --ext .ts,.tsx"
   },
   "devDependencies": {
-    "7zip-bin": "^5.2.0"
+    "typescript": "^5.4.0",
+    "esbuild": "^0.20.0"
   }
 }
