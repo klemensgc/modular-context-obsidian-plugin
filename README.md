@@ -23,6 +23,21 @@ One install, one onboarding, two productivity frontiers.
 
 ---
 
+## 🏢 The AI Company Stack
+
+The plugin isn't just a terminal + an MCP server — paired with the [skills library](https://github.com/klemensgc/modular-context-skills) it's a **whole AI company stack** running on one workflow: your vault is the brain, Claude Code is the operator, and each layer plugs into the next.
+
+| Layer | What it does | Skills |
+|-------|--------------|--------|
+| 🎙️ **Notetaker** | Turn raw transcripts, calls and tweets into structured, tagged knowledge | `process-transcripts`, `xdaily`, `graduate` |
+| 🧠 **Self-healing Knowledge Base** | The vault keeps itself current — reweaves stale modules, fixes links, audits structure, syncs sibling vaults | `reweave`, `vault-audit`, `graph`, `sync`, `pulse` |
+| 📡 **Communication layer** | One read across mail, WhatsApp and Google Workspace — what's happening and what belongs to you | `comms-review`, `whatsapp-digest`, `gsuite-analysis` |
+| 📊 **CRM / ops** | Ready skills that connect to ClickUp — review your sales funnel and pull your weekly plan straight from the workspace | `clickup-review`, `review-core`, `tasklist` |
+
+Each layer is independently useful; together they run a one-person company on autopilot. Skills install from the in-app library (dependencies auto-resolve).
+
+---
+
 ## Architecture
 
 ```

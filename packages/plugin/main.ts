@@ -3864,6 +3864,10 @@ const SKILLS: SkillDef[] = [
   { id: "graph", label: "Graph", description: "Analyze knowledge graph — clusters, bridges, dependency depth", stars: 4, difficulty: "expert", value: "medium", scope: "universal", requires: ["python3"], category: "analyze" },
   { id: "graduate", label: "Graduate", description: "Promote buried transcript insights into standalone modules", stars: 4, difficulty: "operator", value: "high", scope: "native-mc", requires: ["vault-structure", "process-transcripts"], category: "maintain" },
   { id: "skills-audit", label: "Skills Audit", description: "Scan your library → 4-bucket report + contribution motivators", stars: 4, difficulty: "learner", value: "medium", scope: "universal", category: "analyze" },
+  // AI Company Stack — *-review family (v2.1.4)
+  { id: "clickup-review", label: "ClickUp Review", description: "Review a CRM/sales-funnel list in ClickUp — stages, deals near close, stale leads, value sums", stars: 4, difficulty: "operator", value: "high", scope: "universal", requires: ["clickup-connected", "python3", "review-core"], category: "analyze" },
+  { id: "comms-review", label: "Comms Review", description: "Cross-channel owner overview — ClickUp + WhatsApp + Gmail in one report", stars: 5, difficulty: "expert", value: "high", scope: "universal", requires: ["clickup-connected", "whatsapp-macos", "gsuite-connected", "python3", "review-core"], category: "analyze" },
+  { id: "review-core", label: "Review Core (lib)", description: "Shared ClickUp client + normalized model for the *-review family. Internal dependency.", stars: 3, difficulty: "expert", value: "medium", scope: "universal", requires: ["clickup-connected", "python3"], category: "automate" },
 ];
 
 // Known setup flags evaluated at install-time for prereq gating
@@ -3883,6 +3887,8 @@ function evaluateSetupFlag(flag: string, app: App): boolean {
     case "python3":
       try { require("child_process").execSync("command -v python3", { stdio: "ignore" }); return true; }
       catch { return false; }
+    case "clickup-connected":
+      return fs.existsSync(path.join(require("os").homedir(), ".modular-context", "clickup", "credentials.json"));
     default:
       return true; // unknown flag — pass-through (don't block)
   }
@@ -4003,6 +4009,7 @@ interface RegistrySkill {
   size: string;
   primary?: boolean;
   type?: string; // "command" for .claude/commands/ items
+  requires?: string[]; // setup flags + skill-id dependencies (auto-installed)
 }
 
 interface RegistryData {
@@ -4122,7 +4129,7 @@ class SkillRegistry {
     }
   }
 
-  async installSkill(skillId: string): Promise<boolean> {
+  async installSkill(skillId: string, _seen: Set<string> = new Set()): Promise<boolean> {
     const registry = await this.fetchRegistry();
     if (!registry) {
       new Notice("Cannot fetch skill registry. Check your internet connection.");
@@ -4133,6 +4140,18 @@ class SkillRegistry {
     if (!regSkill) {
       new Notice(`Skill "${skillId}" not found in registry.`);
       return false;
+    }
+
+    // Auto-install skill dependencies: any `requires` entry that is itself a registry
+    // skill (e.g. clickup-review requires review-core) — recursive, cycle-guarded.
+    _seen.add(skillId);
+    const data = await this.plugin.loadData() ?? {};
+    const installedIds = new Set(Object.keys(data.installedSkills ?? {}));
+    const deps = (regSkill.requires ?? []).filter(r => registry.skills.some(s => s.id === r));
+    for (const dep of deps) {
+      if (_seen.has(dep) || installedIds.has(dep)) continue;
+      const okDep = await this.installSkill(dep, _seen);
+      if (okDep) new Notice(`Installed dependency: ${dep}`);
     }
 
     const adapter = this.app.vault.adapter;
