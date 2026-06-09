@@ -1,4 +1,4 @@
-# Modular Context | Obsidian LLM Knowledge Base + Communications & Operations
+# Modular Context | Obsidian LLM Knowledge Base for Strategy, Ops & Comms
 
 ![banner](banner.png)
 
