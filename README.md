@@ -1,4 +1,4 @@
-# Modular Context | Karpathy LLM Knowledge Base + Gmail & G-Cal
+# Modular Context | LLM Knowledge Base + Communications & Operations, run from your vault
 
 ![banner](banner.png)
 
@@ -41,39 +41,38 @@ Each layer is independently useful; together they run a one-person company on au
 ## Architecture
 
 ```
-                    🦀  LLM KNOWLEDGE BASE
-                    ┌────────────────────────┐
-                    │   Sources · Wiki ·     │
-                    │   Schema  (vault)      │
-                    └───────┬────────▲───────┘
-                            │        │
-                 feed every │        │ write digest /
-                 new session│        │ synthesise back
-                            ▼        │
-           ╔═════════════════════════╧════════════════════╗
-           ║     🦀  CLAUDE CODE  (sessions · terminals)  ║
-           ║                                              ║
-           ║     ⟲  inbox digest loop                     ║
-           ║     ⟲  meeting prep loop                     ║
-           ║     ⟲  synthesise-files loop                 ║
-           ╚═══════════╦════════════════════╦═════════════╝
-                       │                    │
-                pulls  │                    │  pushes
-                       ▼                    ▼
-           ┌──────────────────────────────────────────┐
-           │   🦀  mcp-google   (stdio · Node)        │
-           └───────────┬──────────────────────┬───────┘
-                       ▼                      ▼
-                    🦀  GOOGLE WORKSPACE (multi-account · 25 tools)
-                    ├─ Gmail    ✓ 4   ← search → send/draft/labels
-                    ├─ GCal     ✓ 6   ← list   → create/update/delete/freebusy
-                    ├─ Drive    ✓ 4   ← list/search → download/upload
-                    ├─ Docs     ✓ 3   ← read   → create/update
-                    ├─ Sheets   ✓ 5   ← read   → write/append/create
-                    └─ Slides   ✓ 3   ← read   → create/add-slide
+   ┌──────────────────────────────────────────────────────────────────┐
+   │  YOUR VAULT — your full context, structured so an LLM works on      │
+   │  YOUR reality: projects · people · decisions · history              │
+   │                                                                     │
+   │  Sources  →  Wiki  →  Schema                                        │
+   │  raw input   linked notes   structured & typed (LLM-navigable)      │
+   └──────────────────────▲────────────────────────▲───────────────────┘
+                    reads  │                        │  writes back
+   ╔═══════════════════════╧════════════════════════╧═══════════════════╗
+   ║              🦀  CLAUDE CODE  (the operator)  🦀                    ║
+   ║                                                                     ║
+   ║   ── works on your notes ──        ── works with the world ──       ║
+   ║   🦀 Capture     🦀 Keep current    🦀 Communicate  🦀 Operate       ║
+   ║   calls & files  fix outdated       read & send      review &       ║
+   ║   → notes        notes + links      email·WhatsApp    act (CRM)      ║
+   ╚══════════════════════════════════════════╦═════════════════╦═══════╝
+                                              ▼                 ▼
+   COMMUNICATIONS  (read + send)
+   ├─ Gmail       ← search          → send / draft / labels
+   └─ WhatsApp    ← read messages     (read-only · macOS)
 
-        ── configured by ──▶  🦀  Modular Context Plugin
-                               (infra · OAuth · sidecar)
+   OPERATIONS  (read + write)
+   └─ ClickUp     ← sales funnel · your tasks · weekly plan  → update · batch actions
+
+   WORKSPACE  (Google · multi-account)
+   ├─ Calendar  ← list           → create / update / delete
+   ├─ Drive     ← list / search  → download / upload
+   ├─ Docs      ← read           → create / update
+   ├─ Sheets    ← read           → write / append
+   └─ Slides    ← read           → create / add slide
+
+   ── set up by ──▶  Modular Context Plugin  (installs skills · handles Google login)
 ```
 
 **Architecture decisions** ([full ADRs in `docs/adrs/`](docs/adrs/)):
