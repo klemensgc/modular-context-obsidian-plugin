@@ -1,4 +1,4 @@
-# Modular Context | LLM Knowledge Base + Communications & Operations, run from your vault
+# Modular Context | LLM Knowledge Base + Communications & Operations, run from your Obsidian
 
 ![banner](banner.png)
 
