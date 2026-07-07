@@ -21,8 +21,8 @@ jobs:
 
             - run: npm ci
 
-            - name: Build all packages
-              run: npm run build
+            - name: Build shipped packages (shared → mcp-google → plugin; packages/app is experimental WIP and excluded from CI)
+              run: npm run build:shared && npm run build:mcp-google && npm run build:plugin
 
             - name: Type check — shared
               run: cd packages/shared && npx tsc --noEmit
