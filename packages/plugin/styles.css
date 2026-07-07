@@ -316,10 +316,23 @@
 .mc-terminal-session {
   position: absolute;
   inset: 0;
-  padding: 0 6px 0 12px;
+  /* No padding here — FitAddon measures the xterm parent's box. Horizontal
+   * inset lives as padding on .xterm itself (FitAddon subtracts it). */
+  padding: 0;
   display: none;
   flex-direction: column;
   background: var(--background-primary);
+}
+
+/* Dedicated xterm host: the ONLY child besides the 24px toolbar. FitAddon
+ * sizes the terminal from this element, so the toolbar no longer inflates
+ * the computed rows (bottom-row clipping fix). */
+.mc-terminal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
 }
 
 .mc-terminal-session.is-active {
@@ -327,8 +340,8 @@
 }
 
 .mc-terminal-session .xterm {
-  flex: 1;
-  min-height: 0;
+  height: 100%;
+  padding: 0 6px 0 12px;
 }
 
 .mc-terminal-session .xterm-viewport {
@@ -345,7 +358,6 @@
   padding: 0 4px 0 8px;
   background: var(--background-secondary);
   border-bottom: 1px solid var(--background-modifier-border);
-  margin: 0 -6px 0 -12px;
 }
 
 .mc-session-toolbar-name {
@@ -467,7 +479,7 @@
   overflow: hidden;
 }
 
-.mc-inline-pane .mc-terminal-session .xterm {
+.mc-inline-pane .mc-terminal-session .mc-terminal-body {
   flex: 1;
   min-height: 0;
 }
@@ -594,7 +606,7 @@
 }
 
 /* --- File overlay (file opened in terminal pane) --- */
-.mc-terminal-session.has-file-overlay > .xterm,
+.mc-terminal-session.has-file-overlay > .mc-terminal-body,
 .mc-terminal-session.has-file-overlay > .mc-session-toolbar {
   display: none !important;
 }
@@ -1081,7 +1093,7 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
   overflow: hidden;
 }
 
-.mc-fullscreen-pane .mc-terminal-session .xterm {
+.mc-fullscreen-pane .mc-terminal-session .mc-terminal-body {
   flex: 1;
   min-height: 0;
 }
@@ -2625,7 +2637,7 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
   overflow: hidden;
 }
 
-.mc-pane > .mc-terminal-session .xterm {
+.mc-pane > .mc-terminal-session .mc-terminal-body {
   flex: 1;
   min-height: 0;
 }

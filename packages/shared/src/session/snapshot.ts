@@ -17,6 +17,9 @@ export interface SessionSnapshot {
   skillName?: string;
   /** Agent state at capture time */
   agentStatus?: "working" | "to-review" | "dismissed";
+  /** Claude Code session UUID bound to this terminal (transcript file name in
+   *  ~/.claude/projects/<munged-cwd>/). Enables `claude -r <id>` auto-resume. */
+  claudeSessionId?: string;
   /** Last N non-empty lines from xterm buffer, oldest → newest */
   bufferTail: string[];
   /** Working directory (best-effort cache from session) */
@@ -29,9 +32,22 @@ export interface SessionSnapshot {
   savedAt: number;
 }
 
+/** Inline layout + pane slot assignment captured alongside snapshots, so a
+ *  restored view comes back with the same split and focus. */
+export interface RestoreLayout {
+  /** FullscreenLayout key (e.g. "single", "split-h", "grid-4") */
+  layout: string;
+  /** Session ids in pane-slot order */
+  slotIds: number[];
+  /** Focused session id */
+  activeId: number | null;
+}
+
 export interface RestoreState {
   version: 1;
   snapshots: SessionSnapshot[];
+  /** Optional — older saveData has no layout; restore falls back to defaults. */
+  layout?: RestoreLayout;
 }
 
 export const RESTORE_STATE_VERSION = 1 as const;

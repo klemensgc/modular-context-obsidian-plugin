@@ -73,6 +73,44 @@ export {
 export {
   type SessionSnapshot,
   type RestoreState,
+  type RestoreLayout,
   RESTORE_STATE_VERSION,
   emptyRestoreState,
 } from "./session/snapshot";
+
+// Skill library (registry fetch + install + prereq gating)
+export {
+  SKILL_REGISTRY_URL,
+  SKILL_BASE_URL,
+  CATEGORY_META,
+  type SkillDef,
+  type RegistrySkill,
+  type RegistryData,
+  type InstalledSkillInfo,
+} from "./skills/types";
+
+export {
+  SkillRegistry,
+  type SkillRegistryHost,
+} from "./skills/SkillRegistry";
+
+export {
+  evaluateSetupFlag,
+  checkSkillPrereqs,
+} from "./skills/setup-flags";
+
+export {
+  sendWhenReady,
+  type PromptWatchProcess,
+  type PromptWatchOptions,
+} from "./skills/prompt-watch";
+
+export {
+  buildOnboardingPrompt,
+  type OnboardingMission,
+} from "./skills/onboarding-prompt";
+
+export {
+  buildConnectionPrompt,
+  type ConnectionKind,
+} from "./skills/connection-prompts";

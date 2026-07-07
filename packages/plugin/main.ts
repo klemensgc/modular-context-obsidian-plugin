@@ -20,6 +20,9 @@ import {
   AUTO_DETECT_WINDOW_MS,
   emptyRestoreState,
   RESTORE_STATE_VERSION,
+  SkillRegistry as SkillRegistryCore,
+  sendWhenReady,
+  buildOnboardingPrompt,
   type FullscreenLayout,
   type DisplayMode,
   type Bookmark,
@@ -27,6 +30,9 @@ import {
   type TrackableSession,
   type SessionSnapshot,
   type RestoreState,
+  type RestoreLayout,
+  type SkillDef,
+  type RegistrySkill,
 } from "@mc/shared";
 import { ConnectGoogleModal } from "./src/google/ui/connect-google-modal";
 import { createStorageMethod } from "./src/google/tokens/storage";
@@ -587,6 +593,10 @@ class TerminalSession {
   fitAddon: FitAddon;
   process: ChildProcess;
   containerEl: HTMLElement;
+  /** Body wrapper hosting the xterm element. FitAddon sizes the terminal from
+   *  the xterm element's PARENT box — the 24px session toolbar must live
+   *  outside that box or every fit() overshoots and clips the bottom row. */
+  bodyEl: HTMLElement;
   id: number;
   name: string;
   app: App;
@@ -603,6 +613,12 @@ class TerminalSession {
   skillName: string | null = null;
   /** Cached cwd for snapshot restore. Not updated live — set on creation, restored on replay. */
   cwd: string | null = null;
+  /** Claude Code session UUID bound to this terminal (transcript file in
+   *  ~/.claude/projects/<munged-cwd>/). Set by TerminalView.bindClaudeSessions(). */
+  claudeSessionId: string | null = null;
+  /** Epoch ms when a `claude` launch command was typed into this session.
+   *  While set, the binder looks for a transcript file created after it. */
+  _claudeLaunchAt: number | null = null;
   private _activityCallback: ((session: TerminalSession) => void) | null = null;
   setActivityCallback(cb: ((session: TerminalSession) => void) | null) {
     this._activityCallback = cb;
@@ -621,6 +637,10 @@ class TerminalSession {
     this.cwd = cwd;
 
     this.containerEl = parent.createDiv({ cls: "mc-terminal-session" });
+    // Dedicated xterm host. FitAddon measures the xterm element's parent, so
+    // this wrapper must contain ONLY the terminal (toolbar/overlays go to
+    // containerEl). See "terminal clipped at bottom" fix.
+    this.bodyEl = this.containerEl.createDiv({ cls: "mc-terminal-body" });
 
     this.terminal = new Terminal({
       cursorBlink: true,
@@ -638,7 +658,7 @@ class TerminalSession {
 
     this.fitAddon = new FitAddon();
     this.terminal.loadAddon(this.fitAddon);
-    this.terminal.open(this.containerEl);
+    this.terminal.open(this.bodyEl);
 
     // WebGL renderer — eliminates DOM-renderer scroll artefacts (residual chars,
     // colour bleed). Falls back silently to default DOM renderer if WebGL2 is
@@ -1010,6 +1030,7 @@ class TerminalSession {
       glyph: this.glyph,
       skillName: this.skillName ?? trackedSkill ?? undefined,
       agentStatus: tracker?.getStatus(this.id),
+      claudeSessionId: this.claudeSessionId ?? undefined,
       bufferTail: this.readTail(30),
       cwd: this.cwd ?? undefined,
       lastActivityAt: this._lastStdoutAt || Date.now(),
@@ -1139,6 +1160,10 @@ class TerminalView extends ItemView {
   private isRenaming = false;
   private sidebarTimerInterval: ReturnType<typeof setInterval> | null = null;
   private sidebarPollInterval: ReturnType<typeof setInterval> | null = null;
+  /** Periodic snapshot persist — crash-safe restore (not only graceful close). */
+  private snapshotInterval: ReturnType<typeof setInterval> | null = null;
+  /** Periodic Claude session UUID binder (transcript file ↔ terminal). */
+  private claudeBindInterval: ReturnType<typeof setInterval> | null = null;
   tracker: AgentTracker | null = null;
   autoMode = false;
   aiProvider: "claude" | "codex" = "claude";
@@ -1301,6 +1326,19 @@ class TerminalView extends ItemView {
     this.sidebarPollInterval = setInterval(() => {
       this.tracker?.pollWithSessions(this.sessions);
     }, 5000);
+
+    // Crash-safe persistence: snapshot all sessions every 30s, not only on
+    // graceful close. A force-quit/crash now loses at most 30s of metadata.
+    this.snapshotInterval = setInterval(() => {
+      const plugin = (this as any).plugin as TerminalPlugin | undefined;
+      if (!plugin?.persistSnapshots || this.sessions.length === 0) return;
+      plugin
+        .persistSnapshots(this.sessions, this.tracker, this.currentRestoreLayout())
+        .catch((e: unknown) => console.warn("[mc] periodic snapshot failed:", e));
+    }, 30000);
+
+    // Bind Claude Code session UUIDs to terminals (enables auto-resume).
+    this.claudeBindInterval = setInterval(() => this.bindClaudeSessions(), 15000);
   }
 
   buildSidebar() {
@@ -2016,27 +2054,9 @@ class TerminalView extends ItemView {
     setTimeout(() => {
       session.process.stdin?.write(agentCmd + "\r");
     }, 300);
+    if (this.aiProvider !== "codex") session._claudeLaunchAt = Date.now();
     // Listen to raw stdout for ❯ prompt — much more reliable than polling terminal buffer
-    let sent = false;
-    const onData = (data: Buffer) => {
-      if (sent) return;
-      if (data.toString().includes("❯")) {
-        sent = true;
-        session.process.stdout?.removeListener("data", onData);
-        setTimeout(() => {
-          session.process.stdin?.write(`/${skill.id}\r`);
-        }, 200);
-      }
-    };
-    session.process.stdout?.on("data", onData);
-    // Safety: stop listening after 30s
-    const safetyTimeout = setTimeout(() => {
-      if (!sent) session.process.stdout?.removeListener("data", onData);
-    }, 30000);
-    (session as any)._skillCleanup = () => {
-      session.process.stdout?.removeListener("data", onData);
-      clearTimeout(safetyTimeout);
-    };
+    (session as any)._skillCleanup = sendWhenReady(session.process, `/${skill.id}\r`);
   }
 
   private startSidebarRename(card: HTMLElement, session: TerminalSession) {
@@ -2249,6 +2269,7 @@ class TerminalView extends ItemView {
       if (!name) {
         const cmd = this.buildAgentCmd();
         setTimeout(() => session.process.stdin?.write(cmd + "\r"), 300);
+        if (this.aiProvider !== "codex") session._claudeLaunchAt = Date.now();
         // Track as working so it appears in Working section immediately
         this.tracker?.track(session, session.name);
       }
@@ -2262,6 +2283,81 @@ class TerminalView extends ItemView {
 
   saveState() {
     this.app.workspace.requestSaveLayout();
+  }
+
+  // --- Claude session binding (auto-resume support) ---
+
+  /** Transcript dir Claude Code uses for a given cwd:
+   *  ~/.claude/projects/<cwd with all non-alphanumerics replaced by "-">. */
+  private claudeProjectDir(cwd: string): string {
+    const path = require("path");
+    const os = require("os");
+    const munged = cwd.replace(/[^A-Za-z0-9]/g, "-");
+    return path.join(os.homedir(), ".claude", "projects", munged);
+  }
+
+  /** True if the transcript file for a Claude session still exists on disk. */
+  private claudeTranscriptExists(cwd: string, sessionId: string): boolean {
+    try {
+      const fs = require("fs");
+      const path = require("path");
+      return fs.existsSync(path.join(this.claudeProjectDir(cwd), `${sessionId}.jsonl`));
+    } catch {
+      return false;
+    }
+  }
+
+  /** Bind Claude Code session UUIDs to terminals. For every session where the
+   *  plugin typed a `claude` launch command (_claudeLaunchAt set), find the
+   *  earliest unclaimed transcript file created after that moment in the
+   *  session's project dir and adopt its UUID. Runs on a 15s interval —
+   *  heuristic, but launches are plugin-driven and thus timestamped exactly. */
+  private bindClaudeSessions() {
+    if (this.aiProvider === "codex") return;
+    const fs = require("fs");
+    const path = require("path");
+    const claimed = new Set<string>();
+    for (const s of this.sessions) {
+      if (s.claudeSessionId) claimed.add(s.claudeSessionId);
+    }
+    const pending = this.sessions
+      .filter((s) => !s.destroyed && s._claudeLaunchAt && s.cwd)
+      .sort((a, b) => (a._claudeLaunchAt! - b._claudeLaunchAt!));
+    for (const session of pending) {
+      const dir = this.claudeProjectDir(session.cwd!);
+      let entries: string[] = [];
+      try { entries = fs.readdirSync(dir); } catch { continue; }
+      let best: { id: string; born: number } | null = null;
+      for (const f of entries) {
+        if (!f.endsWith(".jsonl")) continue;
+        const id = f.slice(0, -".jsonl".length);
+        if (claimed.has(id)) continue;
+        let st: any;
+        try { st = fs.statSync(path.join(dir, f)); } catch { continue; }
+        const born = (st.birthtimeMs && st.birthtimeMs > 0) ? st.birthtimeMs : st.ctimeMs;
+        // Allow 2s clock slack — transcript may be created just before our stamp
+        if (born < session._claudeLaunchAt! - 2000) continue;
+        if (!best || born < best.born) best = { id, born };
+      }
+      if (best) {
+        session.claudeSessionId = best.id;
+        claimed.add(best.id);
+        session._claudeLaunchAt = null;
+      } else if (Date.now() - session._claudeLaunchAt! > 10 * 60 * 1000) {
+        // Claude never started (or transcript dir unknown) — stop looking
+        session._claudeLaunchAt = null;
+      }
+    }
+  }
+
+  /** Snapshot of the current inline layout + slot order for persistence. */
+  currentRestoreLayout(): RestoreLayout {
+    this.syncPaneSlots();
+    return {
+      layout: this.displayMode.layout,
+      slotIds: this.paneSlots.map((s) => s.id),
+      activeId: this.activeSession?.id ?? null,
+    };
   }
 
   // --- Smart restore flow ---
@@ -2319,7 +2415,7 @@ class TerminalView extends ItemView {
     let resolved = false;
     const modal = new RestorePickerModal(this.app, state.snapshots, async (result) => {
       resolved = true;
-      await this.applyPickerResult(state.snapshots, result);
+      await this.applyPickerResult(state.snapshots, result, state.layout);
     });
     // Wrap onClose to catch ESC/dismiss case (user bailed without deciding)
     const origClose = modal.onClose.bind(modal);
@@ -2336,7 +2432,11 @@ class TerminalView extends ItemView {
   }
 
   /** Execute picker decisions: materialize restored, archive skipped. */
-  private async applyPickerResult(allSnapshots: SessionSnapshot[], result: PickerResult) {
+  private async applyPickerResult(
+    allSnapshots: SessionSnapshot[],
+    result: PickerResult,
+    savedLayout?: RestoreLayout,
+  ) {
     const plugin = (this as any).plugin as TerminalPlugin | undefined;
 
     // Materialize selected snapshots as real sessions
@@ -2359,7 +2459,20 @@ class TerminalView extends ItemView {
     if (this.sessions.length === 0) {
       this.createSession();
     } else {
-      this.activeSession = this.sessions[0];
+      // Best-effort layout restore: same split, same slot order, same focus.
+      const byId = new Map(this.sessions.map((s) => [s.id, s]));
+      if (savedLayout && SLOT_COUNT[savedLayout.layout as FullscreenLayout] !== undefined) {
+        this.displayMode = { kind: "inline", layout: savedLayout.layout as FullscreenLayout };
+        this.inlineLayout = savedLayout.layout as FullscreenLayout;
+        this.paneSlots = savedLayout.slotIds
+          .map((id) => byId.get(id))
+          .filter((s): s is TerminalSession => !!s);
+        this.activeSession =
+          (savedLayout.activeId != null ? byId.get(savedLayout.activeId) : undefined)
+          ?? this.sessions[0];
+      } else {
+        this.activeSession = this.sessions[0];
+      }
       this.renderLayout();
       this.renderTabs();
       this.renderSidebarCards();
@@ -2367,18 +2480,21 @@ class TerminalView extends ItemView {
     this._pendingLegacySessions = null;
   }
 
-  /** Create a fresh TerminalSession and write the snapshot's tail as a
-   *  read-only preamble. Does NOT re-run any skill command. */
+  /** Create a fresh TerminalSession, write the snapshot's tail as a read-only
+   *  preamble, then — if the snapshot carries a Claude session UUID whose
+   *  transcript still exists — auto-resume it with `claude -r <id>`. */
   private materializeFromSnapshot(snap: SessionSnapshot): TerminalSession | null {
     try {
       if (snap.id >= this.nextId) this.nextId = snap.id + 1;
       const vaultPath = (this.app.vault.adapter as any).basePath as string;
-      const session = new TerminalSession(this.parkingEl, snap.id, vaultPath, this.app, {
+      const cwd = snap.cwd || vaultPath;
+      const session = new TerminalSession(this.parkingEl, snap.id, cwd, this.app, {
         env: this.getSessionEnv(),
       });
       session.name = snap.name || `zsh ${snap.id}`;
       session.glyph = snap.glyph;
       session.skillName = snap.skillName ?? null;
+      session.claudeSessionId = snap.claudeSessionId ?? null;
       (session as any)._autoNameLocked = true;
       this.addSessionToolbar(session);
       this.sessions.push(session);
@@ -2387,6 +2503,21 @@ class TerminalView extends ItemView {
       setTimeout(() => {
         session.replayTail(snap.bufferTail);
       }, 150);
+      // Auto-resume the Claude session this terminal was running. `claude -r`
+      // forks into a NEW session id, so re-arm the binder to adopt it.
+      if (
+        this.aiProvider !== "codex"
+        && snap.claudeSessionId
+        && this.claudeTranscriptExists(cwd, snap.claudeSessionId)
+      ) {
+        const cmd = this.buildAgentCmd(snap.claudeSessionId);
+        setTimeout(() => {
+          if (session.destroyed) return;
+          session.process.stdin?.write(cmd + "\r");
+          session._claudeLaunchAt = Date.now();
+          this.tracker?.track(session, session.skillName ?? session.name);
+        }, 700);
+      }
       return session;
     } catch (e) {
       console.error("[mc] materializeFromSnapshot failed:", e);
@@ -2718,12 +2849,14 @@ class TerminalView extends ItemView {
     // Capture snapshots before destroying PTYs so next reopen can show picker.
     const plugin = (this as any).plugin as TerminalPlugin | undefined;
     if (plugin?.persistSnapshots) {
-      try { await plugin.persistSnapshots(this.sessions, this.tracker); } catch (e) {
+      try { await plugin.persistSnapshots(this.sessions, this.tracker, this.currentRestoreLayout()); } catch (e) {
         console.error("[mc] persistSnapshots on close failed:", e);
       }
     }
     if (this.sidebarTimerInterval) clearInterval(this.sidebarTimerInterval);
     if (this.sidebarPollInterval) clearInterval(this.sidebarPollInterval);
+    if (this.snapshotInterval) clearInterval(this.snapshotInterval);
+    if (this.claudeBindInterval) clearInterval(this.claudeBindInterval);
     this.fullscreenManager?.destroy();
     this.fullscreenManager = null;
     this.resizeObserver?.disconnect();
@@ -3516,93 +3649,8 @@ class OnboardingModal extends Modal {
       ? `claude --dangerously-skip-permissions\r`
       : `claude\r`;
 
-    const onboardPrompt = [
-      `You are the Modular Context setup agent. You help people build a personal LLM Wiki — a persistent, compounding knowledge base where the LLM does all the bookkeeping and the human focuses on sourcing, exploration, and thinking.`,
-      ``,
-      `## The Pattern (credit: Andrej Karpathy's "LLM Wiki")`,
-      ``,
-      `Most people use LLMs like RAG — upload files, retrieve chunks, generate answers. The LLM rediscovers knowledge from scratch every time. Nothing compounds.`,
-      ``,
-      `The LLM Wiki is different. Instead of retrieving from raw documents, the LLM incrementally builds and maintains a persistent wiki — structured, interlinked markdown files. When you add a source, the LLM reads it, extracts key info, and integrates it into existing pages. Cross-references are already there. Contradictions are flagged. Synthesis reflects everything. The wiki keeps getting richer with every source.`,
-      ``,
-      `You never write the wiki yourself — the LLM writes and maintains all of it. You curate sources, direct analysis, ask questions. The LLM does summarizing, cross-referencing, filing, and bookkeeping. Obsidian is the IDE. The LLM is the programmer. The wiki is the codebase.`,
-      ``,
-      `## Three Layers`,
-      ``,
-      `1. RAW SOURCES — your curated collection of source documents. Immutable. The LLM reads but never modifies.`,
-      `   Implementation: _transcripts/ (categorized) + _transcripts-backlog/ (inbox)`,
-      ``,
-      `2. THE WIKI — LLM-generated markdown files. Summaries, entity pages, concept pages, comparisons, syntheses.`,
-      `   Implementation: Project folders (1_project/, 2_project/) with modules. Each folder has an index file as navigation hub.`,
-      ``,
-      `3. THE SCHEMA — tells the LLM how the wiki is structured, conventions, workflows.`,
-      `   Implementation: CLAUDE.md (root config) + _claude/ (standards, templates, skill references)`,
-      ``,
-      `## Three Operations`,
-      ``,
-      `INGEST — Drop a source, LLM processes it. Reads source, discusses takeaways, writes summary, updates index, updates entity/concept pages across the wiki. One source might touch 10-15 pages.`,
-      `Implementation: Drop transcript in _transcripts-backlog/ then run /process-transcripts`,
-      ``,
-      `QUERY — Ask questions against the wiki. LLM reads relevant pages, synthesizes answer. Good answers get filed back as new wiki pages. Explorations compound.`,
-      `Implementation: Ask Claude Code anything. Use /brief to generate deliverables from wiki content.`,
-      ``,
-      `LINT — Health-check the wiki. Find contradictions, stale claims, orphan pages, missing cross-references, data gaps.`,
-      `Implementation: /pulse (strategic overview), /vault-audit (structure), /reweave (cascade updates), /graph (knowledge graph analysis)`,
-      ``,
-      `## Key Conventions`,
-      ``,
-      `- Every file has frontmatter: title, updated (YYYY-MM-DD), status (stable/draft/needs-update/stub), cadence (hot=7d/tactical=30d/iron-cold=60d/frozen), depends-on (wiki-links), sources (wiki-links to transcripts)`,
-      `- Files: kebab-case.md. Index files: {folder}_index.md`,
-      `- Wiki-links: [[file-name]] create a visible dependency graph. depends-on: in frontmatter tracks what breaks when something changes`,
-      `- Cadence = self-healing: files past their cadence window auto-surface as stale. The wiki tells you what's outdated.`,
-      `- Git versions everything — free changelog, rollback, blame`,
-      `- index.md per folder = content-oriented navigation hub (what's here, one-line summary per page)`,
-      `- Session logs in _claude/4-sessions/ = chronological record of what happened (the "log.md")`,
-      ``,
-      `## Your Mission`,
-      ``,
-      `1. SCAN the vault:`,
-      `   - Check: does CLAUDE.md already exist? If YES: read it fully, then ask user: "You already have a CLAUDE.md. Should I extend it with modular-context conventions (frontmatter, cadence, navigation algorithm), or start fresh?" If extend: add missing sections, preserve existing content. If fresh: back up as CLAUDE-backup.md, create new.`,
-      `   - List top-level folders, count .md files per folder`,
-      `   - Check: do _transcripts/ and _transcripts-backlog/ exist? (raw sources layer)`,
-      `   - Check: are there project folders with *_index.md files? (wiki layer)`,
-      `   - Check: does _claude/ exist with standards? (schema layer)`,
-      `   - Check: do files have frontmatter? Wiki-links?`,
-      ``,
-      `2. DIAGNOSE which layer is weakest:`,
-      `   - No CLAUDE.md / _claude/ → Schema layer missing. LLM is flying blind.`,
-      `   - No _transcripts/ pipeline → Source layer missing. No raw material to build from.`,
-      `   - No index files / no frontmatter / no wiki-links → Wiki layer is flat files, not a knowledge graph.`,
-      `   - All three exist but stale → Maintenance gap. Need lint operations.`,
-      ``,
-      `3. PRESENT vault state: "Here's what you have, here's what's missing, here's what's strong."`,
-      ``,
-      `4. RECOMMEND top 3 actions (pick based on diagnosis):`,
-      ``,
-      `   IF empty vault:`,
-      `   a) Create CLAUDE.md — the schema that teaches the LLM your vault. Include: what this vault is about, project list, folder conventions, frontmatter standard, navigation algorithm.`,
-      `   b) Create first project folder with index: 1_project/1_project_index.md`,
-      `   c) Create _transcripts-backlog/ and drop your first source (meeting notes, article, journal entry)`,
-      ``,
-      `   IF has content, no structure:`,
-      `   a) Create CLAUDE.md describing what exists`,
-      `   b) Add frontmatter to existing files (title, updated, status)`,
-      `   c) Create index files for each folder, add wiki-links between related files`,
-      ``,
-      `   IF structured, no pipeline:`,
-      `   a) Set up _transcripts/ with categories + _transcripts-backlog/`,
-      `   b) Create _claude/ with standards (frontmatter spec, naming conventions)`,
-      `   c) Do a first ingest: process one source end-to-end, show how wiki pages get updated`,
-      ``,
-      `   IF mature vault:`,
-      `   a) Run lint: find stale files, orphans, broken links, missing cross-references`,
-      `   b) Suggest new wiki pages based on concepts mentioned but lacking their own page`,
-      `   c) Identify sources that could fill knowledge gaps`,
-      ``,
-      `5. ASK user what they want to focus on. Then DO IT — create files, add frontmatter, build index pages. Show, don't tell.`,
-      ``,
-      `Remember: the human curates and thinks. You do the bookkeeping. The wiki stays maintained because the cost of maintenance is near zero. Respond in the same language as CLAUDE.md (or English if none exists).`,
-    ].join("\\n");
+    // Prompt lives in @mc/shared (skills/onboarding-prompt) — "scan" = plugin mission.
+    const onboardPrompt = buildOnboardingPrompt("scan");
 
     // Wait for shell to be ready, then launch Claude Code
     setTimeout(() => {
@@ -3610,21 +3658,7 @@ class OnboardingModal extends Modal {
     }, 300);
 
     // Listen to raw stdout for ❯ prompt — reliable across TUI modes
-    let sent = false;
-    const onData = (data: Buffer) => {
-      if (sent) return;
-      if (data.toString().includes("❯")) {
-        sent = true;
-        session.process.stdout?.removeListener("data", onData);
-        setTimeout(() => {
-          session.process.stdin?.write(onboardPrompt + `\r`);
-        }, 200);
-      }
-    };
-    session.process.stdout?.on("data", onData);
-    setTimeout(() => {
-      if (!sent) session.process.stdout?.removeListener("data", onData);
-    }, 30000);
+    sendWhenReady(session.process, onboardPrompt + `\r`);
   }
 
   onClose() {
@@ -3823,30 +3857,7 @@ class SkillMarketplaceModal extends Modal {
 }
 
 // --- Skill definitions for Kanban Dashboard ---
-
-interface SkillDef {
-  id: string;
-  label: string;
-  description: string;
-  primary?: boolean;
-  // v2.1 library extensions (all optional — backwards compat w registries without these fields)
-  stars?: 1 | 2 | 3 | 4 | 5;
-  difficulty?: "learner" | "operator" | "expert";
-  value?: "low" | "medium" | "high";
-  scope?: "universal" | "native-mc";
-  requires?: string[];
-  category?: "analyze" | "capture" | "create" | "maintain" | "automate";
-}
-
-// Category → (label, emoji) for sidebar section headers
-const CATEGORY_META: Record<string, { label: string; icon: string }> = {
-  capture: { label: "Capture", icon: "📥" },
-  analyze: { label: "Analyze", icon: "🔍" },
-  create: { label: "Create", icon: "✏️" },
-  maintain: { label: "Maintain", icon: "🧹" },
-  automate: { label: "Automate", icon: "🤖" },
-  other: { label: "Other", icon: "•" }, // fallback for skills w/o category
-};
+// SkillDef type + CATEGORY_META now live in @mc/shared (skills/types).
 
 const SKILLS: SkillDef[] = [
   // Primary — 3 daily drivers (pre-checked in onboarding + full-width in sidebar)
@@ -3870,45 +3881,8 @@ const SKILLS: SkillDef[] = [
   { id: "review-core", label: "Review Core (lib)", description: "Shared ClickUp client + normalized model for the *-review family. Internal dependency.", stars: 3, difficulty: "expert", value: "medium", scope: "universal", requires: ["clickup-connected", "python3"], category: "automate" },
 ];
 
-// Known setup flags evaluated at install-time for prereq gating
-function evaluateSetupFlag(flag: string, app: App): boolean {
-  const fs = require("fs");
-  const path = require("path");
-  const vaultBase = (app.vault.adapter as any).basePath as string;
-  switch (flag) {
-    case "vault-structure":
-      return fs.existsSync(path.join(vaultBase, "CLAUDE.md"));
-    case "gsuite-connected":
-      return fs.existsSync(path.join(require("os").homedir(), ".modular-context", "mcp-google", "accounts-index.json"));
-    case "whatsapp-macos":
-      return (process as any).platform === "darwin" && fs.existsSync("/Applications/WhatsApp.app");
-    case "git-initialized":
-      return fs.existsSync(path.join(vaultBase, ".git"));
-    case "python3":
-      try { require("child_process").execSync("command -v python3", { stdio: "ignore" }); return true; }
-      catch { return false; }
-    case "clickup-connected":
-      return fs.existsSync(path.join(require("os").homedir(), ".modular-context", "clickup", "credentials.json"));
-    default:
-      return true; // unknown flag — pass-through (don't block)
-  }
-}
-
-// Check skill prereqs against installed + setup flags. Returns missing items or [].
-function checkSkillPrereqs(skill: SkillDef, installedIds: Set<string>, app: App): string[] {
-  if (!skill.requires || skill.requires.length === 0) return [];
-  const missing: string[] = [];
-  for (const req of skill.requires) {
-    // If it's a skill id, check installed
-    if (SKILLS.some((s) => s.id === req)) {
-      if (!installedIds.has(req)) missing.push(`skill:${req}`);
-    } else {
-      // Otherwise treat as setup flag
-      if (!evaluateSetupFlag(req, app)) missing.push(`setup:${req}`);
-    }
-  }
-  return missing;
-}
+// Setup-flag evaluation + prereq checks now live in @mc/shared (skills/setup-flags):
+// evaluateSetupFlag(flag, vaultBase) / checkSkillPrereqs(skill, knownIds, installedIds, vaultBase).
 
 
 // (KanbanView removed — kanban is now integrated into TerminalView sidebar)
@@ -3995,237 +3969,28 @@ class MCSettingTab extends PluginSettingTab {
 
 // --- Skill Registry ---
 
-const SKILL_REGISTRY_URL = "https://raw.githubusercontent.com/klemensgc/modular-context-skills/main/registry.json";
-const SKILL_BASE_URL = "https://raw.githubusercontent.com/klemensgc/modular-context-skills/main/";
+// Registry URLs + RegistrySkill/RegistryData/InstalledSkillInfo types now live in
+// @mc/shared (skills/types) — one source of truth for plugin and app.
 
-interface RegistrySkill {
-  id: string;
-  label: string;
-  description: string;
-  version: string;
-  category: string;
-  tier: string;
-  files: string[];
-  size: string;
-  primary?: boolean;
-  type?: string; // "command" for .claude/commands/ items
-  requires?: string[]; // setup flags + skill-id dependencies (auto-installed)
-}
-
-interface RegistryData {
-  version: string;
-  updated: string;
-  source: string;
-  skills: RegistrySkill[];
-}
-
-interface InstalledSkillInfo {
-  version: string;
-  installedAt: string;
-  modified: boolean;
-  contentHash?: string;
-}
-
-class SkillRegistry {
-  private app: App;
-  private plugin: TerminalPlugin;
-  private cache: RegistryData | null = null;
-
+/** Thin Obsidian host over the shared SkillRegistry core (@mc/shared).
+ *  Same public API as before (fetchRegistry/getSkillStatus/installSkill/
+ *  installMultiple/isModifiedLocally) — implementation moved to shared so the
+ *  Electron app consumes the identical install logic. */
+class SkillRegistry extends SkillRegistryCore {
   constructor(app: App, plugin: TerminalPlugin) {
-    this.app = app;
-    this.plugin = plugin;
-  }
-
-  async fetchRegistry(force = false): Promise<RegistryData | null> {
-    if (this.cache && !force) return this.cache;
-
-    // Try cached data from plugin storage first
-    const pluginData = await this.plugin.loadData() ?? {};
-    const cachedAt = pluginData.registryCachedAt;
-    const now = Date.now();
-    // Use cache if less than 1 hour old and not forced
-    if (!force && cachedAt && (now - new Date(cachedAt).getTime()) < 3600000 && pluginData.registryCache) {
-      this.cache = pluginData.registryCache;
-      return this.cache;
-    }
-
-    try {
-      const response = await requestUrl({ url: SKILL_REGISTRY_URL });
-      if (response.status === 200) {
-        this.cache = response.json as RegistryData;
-        // Persist cache
-        pluginData.registryCache = this.cache;
-        pluginData.registryCachedAt = new Date().toISOString();
-        await this.plugin.saveData(pluginData);
-        return this.cache;
-      }
-    } catch (e) {
-      console.warn("[mc] Failed to fetch skill registry:", e);
-      // Fall back to persisted cache
-      if (pluginData.registryCache) {
-        this.cache = pluginData.registryCache;
-        return this.cache;
-      }
-    }
-    return null;
-  }
-
-  async getSkillStatus(skillId: string): Promise<"not-installed" | "installed" | "update-available"> {
-    const adapter = this.app.vault.adapter;
-    const isCommand = await this.isCommandType(skillId);
-    const path = isCommand
-      ? `.claude/commands/${skillId}.md`
-      : `.claude/skills/${skillId}/SKILL.md`;
-    const exists = await adapter.exists(path);
-    if (!exists) return "not-installed";
-
-    const registry = await this.fetchRegistry();
-    if (!registry) return "installed";
-
-    const pluginData = await this.plugin.loadData() ?? {};
-    const installed = pluginData.installedSkills?.[skillId] as InstalledSkillInfo | undefined;
-    if (!installed) return "installed"; // Installed but not tracked by us
-
-    const regSkill = registry.skills.find(s => s.id === skillId);
-    if (regSkill && regSkill.version !== installed.version) return "update-available";
-
-    return "installed";
-  }
-
-  private async isCommandType(skillId: string): Promise<boolean> {
-    const registry = await this.fetchRegistry();
-    if (!registry) return false;
-    const skill = registry.skills.find(s => s.id === skillId);
-    return skill?.type === "command";
-  }
-
-  private simpleHash(str: string): string {
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-      const ch = str.charCodeAt(i);
-      hash = ((hash << 5) - hash) + ch;
-      hash |= 0;
-    }
-    return hash.toString(36);
-  }
-
-  async isModifiedLocally(skillId: string): Promise<boolean> {
-    const pluginData = await this.plugin.loadData() ?? {};
-    const installed = pluginData.installedSkills?.[skillId] as InstalledSkillInfo | undefined;
-    if (!installed?.contentHash) return false; // Can't tell, assume not modified
-
-    const adapter = this.app.vault.adapter;
-    const isCommand = installed ? await this.isCommandType(skillId) : false;
-    const path = isCommand
-      ? `.claude/commands/${skillId}.md`
-      : `.claude/skills/${skillId}/SKILL.md`;
-
-    try {
-      const content = await adapter.read(path);
-      const currentHash = this.simpleHash(content);
-      return currentHash !== installed.contentHash;
-    } catch {
-      return false;
-    }
-  }
-
-  async installSkill(skillId: string, _seen: Set<string> = new Set()): Promise<boolean> {
-    const registry = await this.fetchRegistry();
-    if (!registry) {
-      new Notice("Cannot fetch skill registry. Check your internet connection.");
-      return false;
-    }
-
-    const regSkill = registry.skills.find(s => s.id === skillId);
-    if (!regSkill) {
-      new Notice(`Skill "${skillId}" not found in registry.`);
-      return false;
-    }
-
-    // Auto-install skill dependencies: any `requires` entry that is itself a registry
-    // skill (e.g. clickup-review requires review-core) — recursive, cycle-guarded.
-    _seen.add(skillId);
-    const data = await this.plugin.loadData() ?? {};
-    const installedIds = new Set(Object.keys(data.installedSkills ?? {}));
-    const deps = (regSkill.requires ?? []).filter(r => registry.skills.some(s => s.id === r));
-    for (const dep of deps) {
-      if (_seen.has(dep) || installedIds.has(dep)) continue;
-      const okDep = await this.installSkill(dep, _seen);
-      if (okDep) new Notice(`Installed dependency: ${dep}`);
-    }
-
-    const adapter = this.app.vault.adapter;
-    const isCommand = regSkill.type === "command";
-    const tierPath = regSkill.tier === "community" ? "community" : "core";
-
-    try {
-      if (isCommand) {
-        // Commands go to .claude/commands/
-        await this.ensureDir(".claude/commands");
-        const url = `${SKILL_BASE_URL}${tierPath}/${skillId}/COMMAND.md`;
+    super({
+      fetchText: async (url: string) => {
         const resp = await requestUrl({ url });
-        const destPath = `.claude/commands/${skillId}.md`;
-        await adapter.write(destPath, resp.text);
-
-        // Track installation
-        await this.trackInstall(skillId, regSkill.version, this.simpleHash(resp.text));
-      } else {
-        // Skills go to .claude/skills/{id}/
-        const skillDir = `.claude/skills/${skillId}`;
-        await this.ensureDir(skillDir);
-
-        for (const file of regSkill.files) {
-          const url = `${SKILL_BASE_URL}${tierPath}/${skillId}/${file}`;
-          const resp = await requestUrl({ url });
-          const destPath = `${skillDir}/${file}`;
-          // Ensure subdirs exist (e.g., references/)
-          const lastSlash = destPath.lastIndexOf("/");
-          if (lastSlash > skillDir.length) {
-            await this.ensureDir(destPath.substring(0, lastSlash));
-          }
-          await adapter.write(destPath, resp.text);
-        }
-
-        // Track installation with hash of main SKILL.md
-        const mainContent = await adapter.read(`${skillDir}/SKILL.md`);
-        await this.trackInstall(skillId, regSkill.version, this.simpleHash(mainContent));
-      }
-
-      return true;
-    } catch (e) {
-      console.error(`[mc] Failed to install skill ${skillId}:`, e);
-      new Notice(`Failed to install "${regSkill.label}". Check console for details.`);
-      return false;
-    }
-  }
-
-  async installMultiple(skillIds: string[], onProgress?: (done: number, total: number) => void): Promise<number> {
-    let installed = 0;
-    for (let i = 0; i < skillIds.length; i++) {
-      const ok = await this.installSkill(skillIds[i]);
-      if (ok) installed++;
-      onProgress?.(i + 1, skillIds.length);
-    }
-    return installed;
-  }
-
-  private async ensureDir(path: string) {
-    const adapter = this.app.vault.adapter;
-    if (!(await adapter.exists(path))) {
-      await adapter.mkdir(path);
-    }
-  }
-
-  private async trackInstall(skillId: string, version: string, contentHash: string) {
-    const pluginData = await this.plugin.loadData() ?? {};
-    if (!pluginData.installedSkills) pluginData.installedSkills = {};
-    pluginData.installedSkills[skillId] = {
-      version,
-      installedAt: new Date().toISOString().split("T")[0],
-      modified: false,
-      contentHash,
-    } as InstalledSkillInfo;
-    await this.plugin.saveData(pluginData);
+        return { status: resp.status, text: resp.text };
+      },
+      readFile: (path: string) => app.vault.adapter.read(path),
+      writeFile: (path: string, content: string) => app.vault.adapter.write(path, content),
+      exists: (path: string) => app.vault.adapter.exists(path),
+      mkdir: (path: string) => app.vault.adapter.mkdir(path),
+      loadData: async () => (await plugin.loadData()) ?? {},
+      saveData: (data: Record<string, any>) => plugin.saveData(data),
+      notify: (message: string) => { new Notice(message); },
+    });
   }
 }
 
@@ -4722,7 +4487,11 @@ export default class TerminalPlugin extends Plugin {
     for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
       const view = leaf.view as TerminalView;
       try {
-        await this.persistSnapshots(view.sessions ?? [], view.tracker ?? null);
+        await this.persistSnapshots(
+          view.sessions ?? [],
+          view.tracker ?? null,
+          view.currentRestoreLayout?.(),
+        );
       } catch (e) {
         console.error("[mc] persistSnapshots on unload failed:", e);
       }
@@ -4738,7 +4507,11 @@ export default class TerminalPlugin extends Plugin {
   /** Persist snapshots of all live sessions to plugin saveData.
    *  Merges with existing archived snapshots so user's "skipped" history
    *  is preserved across restarts. */
-  async persistSnapshots(sessions: TerminalSession[], tracker: AgentTracker | null) {
+  async persistSnapshots(
+    sessions: TerminalSession[],
+    tracker: AgentTracker | null,
+    layout?: RestoreLayout,
+  ) {
     const data = (await this.loadData()) ?? {};
     const prev: RestoreState = data.restoreState ?? emptyRestoreState();
     // Keep existing archived snapshots (user marked them "don't restore")
@@ -4758,6 +4531,7 @@ export default class TerminalPlugin extends Plugin {
     const nextState: RestoreState = {
       version: RESTORE_STATE_VERSION,
       snapshots: merged,
+      layout: layout ?? prev.layout,
     };
     await this.saveData({ ...data, restoreState: nextState });
   }
