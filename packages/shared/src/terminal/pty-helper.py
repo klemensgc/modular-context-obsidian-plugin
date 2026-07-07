@@ -1,4 +1,9 @@
-"""PTY helper for modular-context. Wraps zsh in a real PTY with resize support."""
+"""PTY helper for modular-context. Wraps zsh in a real PTY with resize support.
+
+MC_TERM_CMD (optional): exec this command instead of an interactive shell —
+still through a login shell so PATH resolves (claude lives in npm-global), but
+`exec` replaces zsh, so the user never sees a shell prompt or typed commands.
+"""
 import os, select, signal, struct, fcntl, termios, pty
 
 def main():
@@ -17,7 +22,11 @@ def main():
         os.dup2(slave, 2)
         if slave > 2:
             os.close(slave)
-        os.execvp("/bin/zsh", ["/bin/zsh", "-i", "-l"])
+        cmd = os.environ.get("MC_TERM_CMD")
+        if cmd:
+            os.execvp("/bin/zsh", ["/bin/zsh", "-lc", "exec " + cmd])
+        else:
+            os.execvp("/bin/zsh", ["/bin/zsh", "-i", "-l"])
     os.close(slave)
     def resize(c, r):
         fcntl.ioctl(master, termios.TIOCSWINSZ,
