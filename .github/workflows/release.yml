@@ -32,8 +32,8 @@ jobs:
                   printf 'GOOGLE_OAUTH_CLIENT_ID=%s\nGOOGLE_OAUTH_CLIENT_SECRET=%s\n' \
                     "$GOOGLE_OAUTH_CLIENT_ID" "$GOOGLE_OAUTH_CLIENT_SECRET" > .env.local
 
-            - name: Build all packages (builds mcp-google first, then plugin copies mcp-server.js)
-              run: npm run build
+            - name: Build release packages (shared → mcp-google → plugin; app is experimental and NOT part of the plugin release)
+              run: npm run build:shared && npm run build:mcp-google && npm run build:plugin
 
             - name: Verify release artifacts present
               run: |
