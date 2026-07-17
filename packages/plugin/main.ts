@@ -9,6 +9,7 @@ import {
   buildXtermTheme,
   BookmarkManager,
   AgentTracker,
+  ClaudeSessionRegistry,
   FullscreenManager,
   PTY_HELPER_SOURCE,
   spawnPtyShell,
@@ -18,6 +19,8 @@ import {
   REVIVE_BYTES,
   REVIVE_WINDOW_MS,
   AUTO_DETECT_WINDOW_MS,
+  EXT_WAITING_MIN_AGE_MS,
+  EXT_IDLE_MIN_AGE_MS,
   emptyRestoreState,
   RESTORE_STATE_VERSION,
   SkillRegistry as SkillRegistryCore,
@@ -28,6 +31,7 @@ import {
   type Bookmark,
   type TrackedSession,
   type TrackableSession,
+  type ClaudeRegistryEntry,
   type SessionSnapshot,
   type RestoreState,
   type RestoreLayout,
@@ -41,7 +45,7 @@ import type { TokenStorageMethod, OAuthConfig, StoredTokens, AccountIndex } from
 import { GOOGLE_WORKSPACE_SCOPES } from "@mc/shared";
 
 // Esbuild injects these from packages/plugin/.env.local (empty strings if file absent)
-declare const process: { env: { GOOGLE_OAUTH_CLIENT_ID: string; GOOGLE_OAUTH_CLIENT_SECRET: string } };
+declare const process: { env: { GOOGLE_OAUTH_CLIENT_ID: string; GOOGLE_OAUTH_CLIENT_SECRET: string; PATH?: string } };
 
 const VIEW_TYPE = "mc-terminal-view";
 let ptyHelperPath = "";
@@ -1154,6 +1158,18 @@ class TerminalView extends ItemView {
   sidebarEl!: HTMLElement;
   workingEl!: HTMLElement;
   reviewEl!: HTMLElement;
+  waitingEl!: HTMLElement;
+  /** Waiting section wrapper — hidden entirely when no session is blocked on input.
+   *  null in compact mode (glyphs share one container). */
+  private waitingSectionEl: HTMLElement | null = null;
+  /** Workflows section (multi-agent runs under this vault's transcript dir).
+   *  Expanded sidebar only — null in compact mode; hidden entirely when empty. */
+  private workflowSectionEl: HTMLElement | null = null;
+  private workflowListEl: HTMLElement | null = null;
+  /** Recently-active workflow runs (newest first, capped) — refreshed every 10s
+   *  from journal.jsonl files; pure fs reads, kept across failures. */
+  private workflowRuns: Array<{ runId: string; sessionId: string; name: string; done: number; started: number; mtime: number }> = [];
+  private workflowRefreshInterval: ReturnType<typeof setInterval> | null = null;
   resizeObserver: ResizeObserver | null = null;
   fullscreenManager: FullscreenManager | null = null;
   private resizeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1165,6 +1181,9 @@ class TerminalView extends ItemView {
   /** Periodic Claude session UUID binder (transcript file ↔ terminal). */
   private claudeBindInterval: ReturnType<typeof setInterval> | null = null;
   tracker: AgentTracker | null = null;
+  /** Live Claude Code session registry (~/.claude/sessions/) — injected by
+   *  TerminalPlugin, shared across views. Consumed by registry-driven status. */
+  registry: ClaudeSessionRegistry | null = null;
   autoMode = false;
   aiProvider: "claude" | "codex" = "claude";
   /** CLAUDE_CODE_NO_FLICKER — enables alt screen buffer rendering to fix scroll-jump / flicker bugs. */
@@ -1324,7 +1343,10 @@ class TerminalView extends ItemView {
       this.updateWorkingTimers();
     }, 1000);
     this.sidebarPollInterval = setInterval(() => {
-      this.tracker?.pollWithSessions(this.sessions);
+      // Registry-backed sessions get authoritative CLI status; the rest
+      // (Codex, old CLI, manual shells) fall through to buffer heuristics.
+      const heuristic = this.applyRegistryStatus();
+      this.tracker?.pollWithSessions(heuristic);
     }, 5000);
 
     // Crash-safe persistence: snapshot all sessions every 30s, not only on
@@ -1339,6 +1361,11 @@ class TerminalView extends ItemView {
 
     // Bind Claude Code session UUIDs to terminals (enables auto-resume).
     this.claudeBindInterval = setInterval(() => this.bindClaudeSessions(), 15000);
+
+    // Workflows panel — journal.jsonl scan every 10s. Pure fs reads; the
+    // callback bails while the view is hidden.
+    this.workflowRefreshInterval = setInterval(() => this.refreshWorkflows(), 10000);
+    this.refreshWorkflows();
   }
 
   buildSidebar() {
@@ -1483,10 +1510,23 @@ class TerminalView extends ItemView {
     // --- BOTTOM SECTION: pinned to bottom via spacer ---
     const spacer = this.sidebarEl.createDiv({ cls: "mc-sidebar-spacer" });
 
+    // Workflows — recently-active multi-agent runs for this vault.
+    // Hidden entirely while empty (registry-era CLI feature; Codex users never see it).
+    const wfSection = this.sidebarEl.createDiv({ cls: "mc-sidebar-section mc-wf-section" });
+    wfSection.createDiv({ cls: "mc-sidebar-section-header", text: "Workflows" });
+    this.workflowListEl = wfSection.createDiv({ cls: "mc-sidebar-cards" });
+    this.workflowSectionEl = wfSection;
+
     // Standby (top of bottom group)
     const standbySection = this.sidebarEl.createDiv({ cls: "mc-sidebar-section" });
     standbySection.createDiv({ cls: "mc-sidebar-section-header", text: "Standby" });
     this.standbyEl = standbySection.createDiv({ cls: "mc-sidebar-cards" });
+
+    // Waiting — Claude blocked on user input (registry-driven status)
+    const waitSection = this.sidebarEl.createDiv({ cls: "mc-sidebar-section mc-waiting-section" });
+    waitSection.createDiv({ cls: "mc-sidebar-section-header", text: "Waiting" });
+    this.waitingEl = waitSection.createDiv({ cls: "mc-sidebar-cards" });
+    this.waitingSectionEl = waitSection;
 
     // To Review
     const revSection = this.sidebarEl.createDiv({ cls: "mc-sidebar-section" });
@@ -1523,6 +1563,7 @@ class TerminalView extends ItemView {
     logo.title = "ReceptionOS";
     logo.addEventListener("click", () => window.open("https://www.linkedin.com/company/receptionos/", "_blank"));
 
+    this.renderWorkflows();
     this.renderSidebarCards();
   }
 
@@ -1737,6 +1778,10 @@ class TerminalView extends ItemView {
     this.standbyEl = sessionsArea;
     this.workingEl = sessionsArea;
     this.reviewEl = sessionsArea;
+    this.waitingEl = sessionsArea;
+    this.waitingSectionEl = null;
+    this.workflowSectionEl = null;
+    this.workflowListEl = null;
 
     // "+" new session button (very bottom)
     const newBtn = this.sidebarEl.createDiv({ cls: "mc-compact-icon-btn mc-compact-new" });
@@ -1759,7 +1804,7 @@ class TerminalView extends ItemView {
   renderSidebarCards() {
     this.sidebarDirty = true;
     if (this.isRenaming) return;
-    if (!this.standbyEl || !this.workingEl || !this.reviewEl) return;
+    if (!this.standbyEl || !this.workingEl || !this.reviewEl || !this.waitingEl) return;
     const savedScroll = this.sidebarEl?.scrollTop ?? 0;
 
     // --- Compact mode: unified glyph list ---
@@ -1770,11 +1815,13 @@ class TerminalView extends ItemView {
       for (const session of this.sessions) {
         const tracked = this.tracker?.tracked.find((t) => t.sessionId === session.id);
         const isWorking = tracked && tracked.status === "working";
+        const isWaiting = tracked && tracked.status === "waiting";
 
         const btn = document.createElement("div");
         btn.className = "mc-compact-icon-btn mc-compact-session";
         if (session === this.activeSession) btn.classList.add("is-active");
         if (isWorking) btn.classList.add("is-working");
+        if (isWaiting) btn.classList.add("is-waiting");
         btn.title = session.name;
         btn.dataset.sessionId = String(session.id);
 
@@ -1897,7 +1944,6 @@ class TerminalView extends ItemView {
           this.closeSession(session);
         });
       }
-
       card.addEventListener("click", () => this.switchTo(session));
       card.dataset.sessionId = String(session.id);
       card.addEventListener("contextmenu", (e) => {
@@ -1931,6 +1977,72 @@ class TerminalView extends ItemView {
       });
     }
 
+    // --- Waiting: tracked sessions blocked on user input (status "waiting") ---
+    this.waitingEl.empty();
+    const waiting = this.tracker?.getWaiting() ?? [];
+    for (const t of waiting) {
+      const session = this.sessions.find((s) => s.id === t.sessionId);
+      if (!session) continue;
+
+      const card = this.waitingEl.createDiv({ cls: "mc-sidebar-card mc-waiting-card" });
+      if (session === this.activeSession) card.addClass("is-active");
+      const cardHeader = card.createDiv({ cls: "mc-sidebar-card-header" });
+      // Glyph icon before name (amber — session needs the user's input)
+      const wtGlyphEl = cardHeader.createDiv({ cls: "mc-sidebar-card-glyph is-waiting" });
+      if (session.glyph.startsWith("skill:")) {
+        setIcon(wtGlyphEl, this.getSkillIcon(session.glyph.slice(6)));
+      } else {
+        const g = SESSION_GLYPHS.find((g) => g.id === session.glyph);
+        wtGlyphEl.innerHTML = g?.svg ?? SESSION_GLYPHS[0].svg;
+      }
+      cardHeader.createSpan({ cls: "mc-sidebar-card-name", text: session.name });
+      if (this.sessions.length > 1) {
+        const closeBtn = cardHeader.createDiv({ cls: "mc-sidebar-card-close" });
+        setIcon(closeBtn, "x");
+        closeBtn.title = "Close";
+        closeBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          this.closeSession(session);
+        });
+      }
+
+      // Click = focus the session so the user can answer (same as working cards)
+      card.addEventListener("click", () => this.switchTo(session));
+      card.dataset.sessionId = String(session.id);
+      card.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        this.isRenaming = true;
+        const menu = new Menu();
+        menu.addItem((item) =>
+          item.setTitle("Rename").setIcon("pencil").onClick(() => {
+            const freshCard = this.waitingEl?.querySelector(`[data-session-id="${session.id}"]`) as HTMLElement;
+            if (freshCard) {
+              this.startSidebarRename(freshCard, session);
+            } else {
+              this.isRenaming = false;
+            }
+          })
+        );
+        menu.addItem((item) =>
+          item.setTitle("Close").setIcon("x").onClick(() => {
+            this.isRenaming = false;
+            this.closeSession(session);
+          })
+        );
+        (menu as any).onHide?.(() => {
+          setTimeout(() => {
+            if (this.isRenaming && !this.waitingEl?.querySelector(".mc-sidebar-rename-input")) {
+              this.isRenaming = false;
+            }
+          }, 100);
+        });
+        menu.showAtMouseEvent(e);
+      });
+    }
+    // Hide the whole section when nothing is waiting (registry-only feature —
+    // stays invisible for Codex / old-CLI users)
+    this.waitingSectionEl?.toggleClass("mc-waiting-empty", waiting.length === 0);
+
     // --- To Review: tracked sessions with status "to-review" ---
     this.reviewEl.empty();
     const toReview = this.tracker?.getToReview() ?? [];
@@ -1962,7 +2074,6 @@ class TerminalView extends ItemView {
           this.closeSession(session);
         });
       }
-
       // Click = mark as reviewed (dismiss) + switch to session
       card.addEventListener("click", () => {
         this.tracker?.dismiss(t.sessionId);
@@ -2049,12 +2160,11 @@ class TerminalView extends ItemView {
     // Override glyph with skill icon
     this.assignGlyph(session, skill.id);
     this.tracker?.track(session, skill.id);
-    // Skills always launch fresh (no session resume)
-    const agentCmd = this.buildAgentCmd();
+    // Skills always launch fresh (no session resume) — pre-assign the Claude uuid
+    const agentCmd = this.applyFreshClaudeIdentity(session, this.buildAgentCmd());
     setTimeout(() => {
       session.process.stdin?.write(agentCmd + "\r");
     }, 300);
-    if (this.aiProvider !== "codex") session._claudeLaunchAt = Date.now();
     // Listen to raw stdout for ❯ prompt — much more reliable than polling terminal buffer
     (session as any)._skillCleanup = sendWhenReady(session.process, `/${skill.id}\r`);
   }
@@ -2267,9 +2377,9 @@ class TerminalView extends ItemView {
       // Auto-launch AI agent (fresh session, no history resume).
       // Skip if name was provided (= skill launch, handled by launchSkill).
       if (!name) {
-        const cmd = this.buildAgentCmd();
+        // Fresh launch — pre-assign the Claude session uuid (--session-id)
+        const cmd = this.applyFreshClaudeIdentity(session, this.buildAgentCmd());
         setTimeout(() => session.process.stdin?.write(cmd + "\r"), 300);
-        if (this.aiProvider !== "codex") session._claudeLaunchAt = Date.now();
         // Track as working so it appears in Working section immediately
         this.tracker?.track(session, session.name);
       }
@@ -2816,6 +2926,217 @@ class TerminalView extends ItemView {
     return cmd;
   }
 
+  /** Pre-assign a Claude session UUID at FRESH launch (`--session-id`) so the
+   *  terminal ↔ Claude binding is deterministic and the live registry
+   *  (~/.claude/sessions/) can be matched by id immediately. User-locked custom
+   *  names travel into Claude via `-n` (shown in prompt box / resume picker).
+   *  Never applied to resume commands (`claude -r` keeps its own id) — resume
+   *  and manually-typed launches still go through bindClaudeSessions(). */
+  applyFreshClaudeIdentity(session: TerminalSession, cmd: string): string {
+    if (this.aiProvider === "codex") return cmd;
+    let uuid: string | null = null;
+    try { uuid = require("crypto").randomUUID(); } catch {}
+    if (!uuid) {
+      // Couldn't mint a uuid — fall back to the transcript-file binder heuristic.
+      session._claudeLaunchAt = Date.now();
+      return cmd;
+    }
+    session.claudeSessionId = uuid;
+    // _claudeLaunchAt stays null — the binder must not re-adopt a different id.
+    cmd += ` --session-id ${uuid}`;
+    if ((session as any)._autoNameLocked && session.name) {
+      const escaped = session.name.replace(/(["\\$`])/g, "\\$1");
+      cmd += ` -n "${escaped}"`;
+    }
+    return cmd;
+  }
+
+  /** Push authoritative CLI status (busy/idle/waiting) from the live registry
+   *  into the tracker for every session bound to a Claude session UUID.
+   *  Returns the sessions WITHOUT a live registry entry — the caller feeds
+   *  those to the buffer-heuristic poll so the two paths never double-drive
+   *  one session. Also invoked on registry onChange for snappy transitions. */
+  applyRegistryStatus(): TerminalSession[] {
+    if (!this.registry) return this.sessions;
+    const heuristic: TerminalSession[] = [];
+    const now = Date.now();
+    for (const session of this.sessions) {
+      const entry = session.claudeSessionId
+        ? this.registry.getBySessionId(session.claudeSessionId)
+        : undefined;
+      if (entry) {
+        // Entry existence implies freshness — the registry pid-verifies on scan.
+        this.tracker?.applyExternalStatus(session, entry.status, now - entry.statusUpdatedAt);
+        this.maybeAdoptRegistryName(session, entry);
+      } else {
+        heuristic.push(session);
+      }
+    }
+    return heuristic;
+  }
+
+  /** Adopt the CLI's display name for a session the user hasn't renamed.
+   *  Skips generic dir-derived fallbacks ("modular-context-7d"-style / the
+   *  vault dir name) — they carry no signal the card doesn't already show. */
+  private maybeAdoptRegistryName(session: TerminalSession, entry: ClaudeRegistryEntry) {
+    if ((session as any)._autoNameLocked) return; // user-set names are sacred
+    const raw = entry.name?.trim();
+    if (!raw) return;
+    if (this.isGenericRegistryName(raw, entry)) return;
+    const display = raw.length > 35 ? raw.slice(0, 35) + "…" : raw;
+    if (display === session.name) return; // already adopted
+    session.name = display;
+    if ((session as any)._autoNameInterval) {
+      clearInterval((session as any)._autoNameInterval);
+      (session as any)._autoNameInterval = null;
+    }
+    if ((session as any)._toolbarNameEl) (session as any)._toolbarNameEl.textContent = display;
+    this.fs?.renderFsTabs();
+    this.renderSidebarCards();
+    this.saveState();
+  }
+
+  /** True when a registry name is just the CLI's directory-derived fallback
+   *  ("<dir>" or "<dir>-7d") rather than a user/task-set name. */
+  private isGenericRegistryName(name: string, entry: ClaudeRegistryEntry): boolean {
+    // nameSource "derived" = the CLI auto-named from the cwd — always generic.
+    if (entry.nameSource === "derived") return true;
+    if (/^modular-context(-[a-z0-9]+)?$/.test(name)) return true;
+    const path = require("path");
+    const bases: string[] = [];
+    try { bases.push(path.basename((this.app.vault.adapter as any).basePath ?? "")); } catch {}
+    try { if (entry.cwd) bases.push(path.basename(entry.cwd)); } catch {}
+    for (const base of bases) {
+      if (!base) continue;
+      const esc = base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      if (new RegExp(`^${esc}(-[a-z0-9]+)?$`, "i").test(name)) return true;
+    }
+    return false;
+  }
+
+  // --- Workflows (journal.jsonl progress under the vault's transcript dir) ---
+
+  /** Scan for recently-active multi-agent workflow runs. Layout (internal CLI
+   *  schema, parsed defensively): <projectDir>/<sessionId>/subagents/workflows/
+   *  <runId>/journal.jsonl with one `started` line per spawned agent and one
+   *  `result` line per finished agent. Pure fs reads — journals are small
+   *  (one line per agent), and only runs touched in the last 30 min qualify. */
+  private refreshWorkflows() {
+    if (this.aiProvider === "codex") return;
+    if (!this.containerEl.isShown()) return;
+    const runs: typeof this.workflowRuns = [];
+    try {
+      const fs = require("fs");
+      const path = require("path");
+      const vaultPath = (this.app.vault.adapter as any).basePath as string;
+      const projectDir = this.claudeProjectDir(vaultPath);
+      const cutoff = Date.now() - 30 * 60 * 1000;
+      for (const entry of fs.readdirSync(projectDir)) {
+        if (entry.endsWith(".jsonl")) continue; // transcript files, not session dirs
+        const wfDir = path.join(projectDir, entry, "subagents", "workflows");
+        let runIds: string[] = [];
+        try { runIds = fs.readdirSync(wfDir); } catch { continue; } // session has no workflows
+        for (const runId of runIds) {
+          const journal = path.join(wfDir, runId, "journal.jsonl");
+          let st: any;
+          try { st = fs.statSync(journal); } catch { continue; }
+          if (st.mtimeMs < cutoff) continue;
+          let started = 0, done = 0;
+          try {
+            for (const line of fs.readFileSync(journal, "utf8").split("\n")) {
+              if (!line.trim()) continue;
+              try {
+                const rec = JSON.parse(line);
+                if (rec?.type === "started") started++;
+                else if (rec?.type === "result") done++;
+              } catch {} // partial write — skip the line
+            }
+          } catch { continue; }
+          runs.push({
+            runId,
+            sessionId: entry,
+            name: this.workflowRunName(path.join(projectDir, entry), runId),
+            done,
+            started,
+            mtime: st.mtimeMs,
+          });
+        }
+      }
+    } catch { return; } // project dir missing (no Claude run yet) — keep last list
+    // The same runId can surface under several session dirs (resumed/forked
+    // sessions) — keep one row per run, preferring the copy whose script name
+    // resolved, then the freshest journal.
+    const byRun = new Map<string, (typeof runs)[number]>();
+    for (const run of runs) {
+      const prev = byRun.get(run.runId);
+      if (!prev) { byRun.set(run.runId, run); continue; }
+      const prevNamed = prev.name !== prev.runId.replace(/^wf_/, "");
+      const runNamed = run.name !== run.runId.replace(/^wf_/, "");
+      if ((runNamed && !prevNamed) || (runNamed === prevNamed && run.mtime > prev.mtime)) {
+        byRun.set(run.runId, run);
+      }
+    }
+    this.workflowRuns = [...byRun.values()].sort((a, b) => b.mtime - a.mtime).slice(0, 4);
+    this.renderWorkflows();
+  }
+
+  /** Workflow display name from its persisted script: <sessionDir>/workflows/
+   *  scripts/<name>-<runId>.js. Falls back to the runId prefix. */
+  private workflowRunName(sessionDir: string, runId: string): string {
+    try {
+      const fs = require("fs");
+      const path = require("path");
+      const scripts = fs.readdirSync(path.join(sessionDir, "workflows", "scripts"));
+      const suffix = `-${runId}.js`;
+      for (const f of scripts) {
+        if (f.endsWith(suffix)) return f.slice(0, -suffix.length);
+      }
+    } catch {} // scripts dir absent — named workflows launched by name
+    return runId.replace(/^wf_/, "");
+  }
+
+  /** Render Workflows rows from the cache. Separate from renderSidebarCards —
+   *  the list only changes on the 10s refresh, not on every card re-render.
+   *  A run still short of its started count shows live progress; a fully
+   *  drained journal reads as done. Click focuses the owning terminal when
+   *  one of our sessions is bound to the parent Claude session. */
+  private renderWorkflows() {
+    if (!this.workflowListEl || !this.workflowSectionEl) return;
+    this.workflowListEl.empty();
+    for (const run of this.workflowRuns) {
+      const row = this.workflowListEl.createDiv({ cls: "mc-sidebar-card mc-wf-card" });
+      const header = row.createDiv({ cls: "mc-sidebar-card-header" });
+      header.createSpan({ cls: "mc-sidebar-card-name", text: run.name });
+      const running = run.started > run.done;
+      header.createSpan({
+        cls: "mc-sidebar-card-time" + (running ? " mc-wf-running" : ""),
+        text: `${run.done}/${run.started}`,
+      });
+      const owner = this.sessions.find((s) => !s.destroyed && s.claudeSessionId === run.sessionId);
+      if (owner) {
+        row.title = "Focus the session running this workflow";
+        row.addEventListener("click", () => this.switchTo(owner));
+      } else {
+        row.addClass("mc-wf-detached");
+      }
+    }
+    this.workflowSectionEl.toggleClass("mc-wf-empty", this.workflowRuns.length === 0);
+  }
+
+  /** Fast-path status from a deep-integration hook event (claude-events.jsonl,
+   *  tailed by TerminalPlugin). Stop = the turn finished → to-review;
+   *  Notification = Claude needs input → waiting. Reuses applyExternalStatus
+   *  with the age threshold pre-satisfied so the hook beats the registry poll. */
+  applyHookEvent(claudeSessionId: string, event: "Stop" | "Notification") {
+    const session = this.sessions.find((s) => s.claudeSessionId === claudeSessionId);
+    if (!session || !this.tracker) return;
+    if (event === "Stop") {
+      this.tracker.applyExternalStatus(session, "idle", EXT_IDLE_MIN_AGE_MS, "hook");
+    } else {
+      this.tracker.applyExternalStatus(session, "waiting", EXT_WAITING_MIN_AGE_MS, "hook");
+    }
+  }
+
   closeSession(session: TerminalSession) {
     if ((session as any)._autoNameInterval) clearInterval((session as any)._autoNameInterval);
     if ((session as any)._skillCleanup) (session as any)._skillCleanup();
@@ -2857,6 +3178,7 @@ class TerminalView extends ItemView {
     if (this.sidebarPollInterval) clearInterval(this.sidebarPollInterval);
     if (this.snapshotInterval) clearInterval(this.snapshotInterval);
     if (this.claudeBindInterval) clearInterval(this.claudeBindInterval);
+    if (this.workflowRefreshInterval) clearInterval(this.workflowRefreshInterval);
     this.fullscreenManager?.destroy();
     this.fullscreenManager = null;
     this.resizeObserver?.disconnect();
@@ -2938,6 +3260,9 @@ function classifySnapshot(s: SessionSnapshot): ClassifiedSnapshot {
   }
   if (s.agentStatus === "working") {
     return { snap: s, bucket: "attention", reason: "Agent was working", score: 100 };
+  }
+  if (s.agentStatus === "waiting") {
+    return { snap: s, bucket: "attention", reason: "Agent was waiting for input", score: 95 };
   }
   if (s.agentStatus === "to-review") {
     return { snap: s, bucket: "attention", reason: "Awaiting your review", score: 90 };
@@ -3645,9 +3970,11 @@ class OnboardingModal extends Modal {
 
     view.tracker?.track(session, "onboard");
 
-    const claudeCmd = view.autoMode
-      ? `claude --dangerously-skip-permissions\r`
-      : `claude\r`;
+    // Fresh launch — pre-assign the Claude session uuid (--session-id / -n)
+    const claudeCmd = view.applyFreshClaudeIdentity(
+      session,
+      view.autoMode ? `claude --dangerously-skip-permissions` : `claude`,
+    ) + `\r`;
 
     // Prompt lives in @mc/shared (skills/onboarding-prompt) — "scan" = plugin mission.
     const onboardPrompt = buildOnboardingPrompt("scan");
@@ -3964,6 +4291,22 @@ class MCSettingTab extends PluginSettingTab {
           await this.plugin.saveData(data);
         })
       );
+    new Setting(containerEl)
+      .setName("Deep integration hooks (experimental)")
+      .setDesc("Add Stop + Notification hooks to this vault's .claude/settings.json so terminal status updates instantly. Merges with existing hooks; disabling removes only the plugin's entries.")
+      .addToggle((toggle) => toggle
+        .setValue(data.deepHooks ?? false)
+        .onChange(async (value) => {
+          const ok = value
+            ? this.plugin.enableDeepHooks()
+            : this.plugin.disableDeepHooks();
+          data.deepHooks = ok ? value : false;
+          await this.plugin.saveData(data);
+          // Failed merge/removal — re-render so the toggle reflects reality
+          // (setValue here would re-trigger onChange and risk a loop).
+          if (!ok) void this.display();
+        })
+      );
   }
 }
 
@@ -3998,9 +4341,18 @@ class SkillRegistry extends SkillRegistryCore {
 
 export default class TerminalPlugin extends Plugin {
   agentTracker!: AgentTracker;
+  sessionRegistry!: ClaudeSessionRegistry;
   skillRegistry!: SkillRegistry;
   googleStorage: TokenStorageMethod | null = null;
   googleRefreshTimer: RefreshTimerHandle | null = null;
+  /** Deep-integration events tailer (claude-events.jsonl) — fs.FSWatcher when active. */
+  private eventsWatcher: any = null;
+  /** Byte offset of the last consumed event — the tailer only reads appended bytes. */
+  private eventsOffset = 0;
+  /** Trailing partial line carried between reads (`cat >>` writes aren't line-atomic). */
+  private eventsPartial = "";
+  /** Set on unload — blocks startEventsTailer if onload's async loadData resolves late. */
+  private _unloaded = false;
 
   getGoogleOAuthConfig(): OAuthConfig {
     return {
@@ -4112,9 +4464,30 @@ export default class TerminalPlugin extends Plugin {
       }
     });
 
+    // Claude session registry — mirrors ~/.claude/sessions/ live state so
+    // terminal status can be driven by the CLI's own reporting instead of
+    // buffer heuristics. onChange applies the fresh statuses immediately
+    // (faster than the 5s poll) and re-renders sidebars (same as the tracker).
+    this.sessionRegistry = new ClaudeSessionRegistry(() => {
+      for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
+        const view = leaf.view as TerminalView;
+        view.applyRegistryStatus();
+        view.renderSidebarCards();
+      }
+    });
+    this.sessionRegistry.start();
+
+    // Deep-integration hooks (opt-in): resume tailing the events file the
+    // vault hooks append to. The settings.json merge happened at toggle time.
+    void (async () => {
+      const data = (await this.loadData()) ?? {};
+      if (data.deepHooks) this.startEventsTailer();
+    })();
+
     this.registerView(VIEW_TYPE, (leaf) => {
       const view = new TerminalView(leaf);
       view.tracker = this.agentTracker;
+      view.registry = this.sessionRegistry;
       (view as any).plugin = this;
       return view;
     });
@@ -4482,6 +4855,7 @@ export default class TerminalPlugin extends Plugin {
   }
 
   async onunload() {
+    this._unloaded = true;
     // Capture snapshots of any live sessions before detaching leaves.
     // detachLeavesOfType would destroy them and lose tail buffers.
     for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
@@ -4497,9 +4871,204 @@ export default class TerminalPlugin extends Plugin {
       }
     }
     this.agentTracker.stop();
+    this.sessionRegistry.stop();
+    this.stopEventsTailer();
     this.googleRefreshTimer?.cancel();
     this.googleRefreshTimer = null;
     this.app.workspace.detachLeavesOfType(VIEW_TYPE);
+  }
+
+  // --- Deep integration hooks (opt-in, experimental) ---
+  // The vault's .claude/settings.json gets Stop + Notification hooks whose
+  // command appends the hook's stdin JSON to claude-events.jsonl in the plugin
+  // dir. The tailer below turns those events into instant status transitions —
+  // faster than the sessions-registry poll. Merge is surgical: existing hook
+  // entries are never touched, disable removes exactly our command string.
+
+  /** Absolute path to the events file the hooks append to. */
+  private claudeEventsPath(): string {
+    const path = require("path");
+    const vaultBase = (this.app.vault.adapter as any).basePath as string;
+    return path.join(vaultBase, this.manifest.dir, "claude-events.jsonl");
+  }
+
+  /** The exact hook command we install — also the removal matcher on disable. */
+  private deepHookCommand(): string {
+    return `cat >> "${this.claudeEventsPath()}"`;
+  }
+
+  /** Absolute path to the vault's Claude Code settings file. */
+  private vaultClaudeSettingsPath(): string {
+    const path = require("path");
+    const vaultBase = (this.app.vault.adapter as any).basePath as string;
+    return path.join(vaultBase, ".claude", "settings.json");
+  }
+
+  /** Enable deep hooks: merge Stop + Notification entries into the vault's
+   *  .claude/settings.json (never clobbering existing hooks) and start the
+   *  tailer. Returns false — with a Notice — when the file can't be edited
+   *  safely (unparseable JSON, unexpected shapes). */
+  enableDeepHooks(): boolean {
+    const fs = require("fs");
+    const path = require("path");
+    const file = this.vaultClaudeSettingsPath();
+    const cmd = this.deepHookCommand();
+    let settings: any = {};
+    try {
+      if (fs.existsSync(file)) settings = JSON.parse(fs.readFileSync(file, "utf8"));
+    } catch {
+      new Notice("Modular Context: .claude/settings.json is not valid JSON — hooks not installed.");
+      return false;
+    }
+    if (settings === null || typeof settings !== "object" || Array.isArray(settings)) {
+      new Notice("Modular Context: unexpected .claude/settings.json shape — hooks not installed.");
+      return false;
+    }
+    if (settings.hooks == null) settings.hooks = {};
+    if (typeof settings.hooks !== "object" || Array.isArray(settings.hooks)) {
+      new Notice("Modular Context: unexpected hooks shape in .claude/settings.json — hooks not installed.");
+      return false;
+    }
+    for (const event of ["Stop", "Notification"]) {
+      if (settings.hooks[event] == null) settings.hooks[event] = [];
+      const groups = settings.hooks[event];
+      if (!Array.isArray(groups)) {
+        new Notice(`Modular Context: unexpected ${event} hooks shape — hooks not installed.`);
+        return false;
+      }
+      const present = groups.some((g: any) =>
+        Array.isArray(g?.hooks) && g.hooks.some((h: any) => h?.command === cmd));
+      if (!present) groups.push({ hooks: [{ type: "command", command: cmd }] });
+    }
+    try {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, JSON.stringify(settings, null, 2) + "\n");
+    } catch (e) {
+      console.error("[mc] failed to write .claude/settings.json:", e);
+      new Notice("Modular Context: failed to write .claude/settings.json — hooks not installed.");
+      return false;
+    }
+    this.startEventsTailer();
+    return true;
+  }
+
+  /** Disable deep hooks: stop the tailer and remove exactly the entries we
+   *  added (matched by command string) from Stop + Notification. */
+  disableDeepHooks(): boolean {
+    this.stopEventsTailer();
+    const fs = require("fs");
+    const file = this.vaultClaudeSettingsPath();
+    const cmd = this.deepHookCommand();
+    let settings: any;
+    try {
+      if (!fs.existsSync(file)) return true; // nothing to remove
+      settings = JSON.parse(fs.readFileSync(file, "utf8"));
+    } catch {
+      new Notice("Modular Context: .claude/settings.json is not valid JSON — remove the plugin hooks manually.");
+      return false;
+    }
+    const hooks = settings?.hooks;
+    if (hooks == null || typeof hooks !== "object") return true;
+    for (const event of ["Stop", "Notification"]) {
+      const groups = hooks[event];
+      if (!Array.isArray(groups)) continue;
+      hooks[event] = groups
+        .map((g: any) => {
+          if (!Array.isArray(g?.hooks)) return g; // not ours — untouched
+          return { ...g, hooks: g.hooks.filter((h: any) => h?.command !== cmd) };
+        })
+        // Drop groups our removal emptied; foreign groups keep their entries.
+        .filter((g: any) => !Array.isArray(g?.hooks) || g.hooks.length > 0);
+      if (hooks[event].length === 0) delete hooks[event];
+    }
+    try {
+      fs.writeFileSync(file, JSON.stringify(settings, null, 2) + "\n");
+    } catch (e) {
+      console.error("[mc] failed to write .claude/settings.json:", e);
+      new Notice("Modular Context: failed to update .claude/settings.json — remove the plugin hooks manually.");
+      return false;
+    }
+    return true;
+  }
+
+  /** Start tailing claude-events.jsonl. Watches the plugin dir (the file may
+   *  not exist yet and truncation replaces the inode) and starts at EOF so
+   *  stale events from previous runs never flip live sessions. */
+  startEventsTailer() {
+    if (this.eventsWatcher || this._unloaded) return; // _unloaded: onload's async loadData may resolve after onunload
+    const fs = require("fs");
+    const path = require("path");
+    const file = this.claudeEventsPath();
+    try { this.eventsOffset = fs.statSync(file).size; } catch { this.eventsOffset = 0; }
+    this.eventsPartial = "";
+    try {
+      this.eventsWatcher = fs.watch(path.dirname(file), (_ev: string, filename: string | null) => {
+        if (filename && filename !== path.basename(file)) return;
+        this.consumeEventsFile();
+      });
+    } catch (e) {
+      console.warn("[mc] events tailer failed to start:", e);
+      this.eventsWatcher = null;
+    }
+  }
+
+  stopEventsTailer() {
+    try { this.eventsWatcher?.close(); } catch {}
+    this.eventsWatcher = null;
+    this.eventsPartial = "";
+  }
+
+  /** Read bytes appended since the last consume and dispatch Stop/Notification
+   *  events to the views. Defensive throughout — the file is written by `cat`
+   *  from hook stdin, so lines can be partial, interleaved, or malformed. */
+  private consumeEventsFile() {
+    const fs = require("fs");
+    const file = this.claudeEventsPath();
+    let size: number;
+    try { size = fs.statSync(file).size; } catch { return; } // deleted — next append recreates it
+    if (size < this.eventsOffset) {
+      // Truncated (by us below or externally) — restart from the top
+      this.eventsOffset = 0;
+      this.eventsPartial = "";
+    }
+    if (size === this.eventsOffset) return;
+    let chunk: string;
+    try {
+      const buf = Buffer.alloc(size - this.eventsOffset);
+      const fd = fs.openSync(file, "r");
+      try { fs.readSync(fd, buf, 0, buf.length, this.eventsOffset); } finally { fs.closeSync(fd); }
+      chunk = buf.toString("utf8");
+    } catch { return; }
+    this.eventsOffset = size;
+    const lines = (this.eventsPartial + chunk).split("\n");
+    this.eventsPartial = lines.pop() ?? "";
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      let entry: any;
+      try { entry = JSON.parse(trimmed); } catch { continue; } // partial/garbled line
+      const sid = typeof entry?.session_id === "string"
+        ? entry.session_id
+        : (typeof entry?.sessionId === "string" ? entry.sessionId : null);
+      const event = entry?.hook_event_name;
+      if (!sid || (event !== "Stop" && event !== "Notification")) continue;
+      for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
+        (leaf.view as TerminalView).applyHookEvent(sid, event);
+      }
+    }
+    // Cap the append-only file at 1MB — we are its only consumer. Re-stat
+    // first: hooks may have appended since our read, and truncating would
+    // drop those events unread. If it grew, skip — the next watch event
+    // consumes the new bytes and retries the cap.
+    if (size > 1024 * 1024) {
+      try {
+        if (fs.statSync(file).size === this.eventsOffset) {
+          fs.truncateSync(file, 0);
+          this.eventsOffset = 0;
+          this.eventsPartial = "";
+        }
+      } catch {}
+    }
   }
 
   // --- Session snapshot persistence (smart restore picker) ---

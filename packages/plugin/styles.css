@@ -1344,6 +1344,12 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
   animation: mc-compact-pulse 1.5s ease-in-out infinite;
 }
 
+/* Waiting session glyph — amber pulse (Claude blocked on user input) */
+.mc-compact-icon-btn.mc-compact-session.is-waiting {
+  color: #d9a406;
+  animation: mc-compact-pulse 1.5s ease-in-out infinite;
+}
+
 @keyframes mc-compact-pulse {
   0%, 100% { opacity: 0.7; }
   50% { opacity: 1; }
@@ -1466,6 +1472,11 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
 .mc-sidebar-card-glyph.is-review,
 .mc-sidebar-card.is-active .mc-sidebar-card-glyph.is-review {
   color: var(--interactive-accent);
+}
+
+.mc-sidebar-card-glyph.is-waiting,
+.mc-sidebar-card.is-active .mc-sidebar-card-glyph.is-waiting {
+  color: #d9a406;
 }
 
 /* --- Sidebar sections --- */
@@ -1667,6 +1678,47 @@ body:has(.mc-fullscreen-overlay.is-visible) > .menu {
 
 .mc-sidebar-card.is-review {
   border-left: 3px solid var(--interactive-accent);
+}
+
+/* Waiting card — amber signaled via background tint + glyph glow, no border accents */
+.mc-sidebar-card.mc-waiting-card {
+  background: rgba(217, 164, 6, 0.07);
+}
+
+.mc-sidebar-card.mc-waiting-card:hover {
+  background: rgba(217, 164, 6, 0.12);
+}
+
+.mc-sidebar-card.mc-waiting-card .mc-sidebar-card-glyph.is-waiting svg {
+  filter: drop-shadow(0 0 3px rgba(217, 164, 6, 0.5));
+}
+
+/* Waiting section collapses entirely when no session is blocked on input */
+.mc-waiting-section.mc-waiting-empty {
+  display: none;
+}
+
+/* Workflows section (multi-agent run progress) — hidden when empty */
+.mc-wf-section.mc-wf-empty {
+  display: none;
+}
+
+/* Workflow rows reuse the card chrome; muted name, progress in the time slot.
+   A running count gets normal-text emphasis; done runs stay faint. */
+.mc-sidebar-card.mc-wf-card .mc-sidebar-card-name {
+  color: var(--text-muted);
+}
+
+.mc-sidebar-card.mc-wf-card:hover .mc-sidebar-card-name {
+  color: var(--text-normal);
+}
+
+.mc-sidebar-card.mc-wf-card .mc-sidebar-card-time.mc-wf-running {
+  color: var(--text-normal);
+}
+
+.mc-sidebar-card.mc-wf-detached {
+  cursor: default;
 }
 
 .mc-sidebar-card-header {

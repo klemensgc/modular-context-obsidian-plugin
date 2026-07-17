@@ -49,7 +49,15 @@ export {
   REVIVE_BYTES,
   REVIVE_WINDOW_MS,
   AUTO_DETECT_WINDOW_MS,
+  EXT_WAITING_MIN_AGE_MS,
+  EXT_IDLE_MIN_AGE_MS,
 } from "./agent/AgentTracker";
+
+export {
+  ClaudeSessionRegistry,
+  type ClaudeRegistryEntry,
+  type ClaudeSessionStatus,
+} from "./agent/SessionRegistry";
 
 // Google Workspace types (W1 + W2 + multi-account)
 export {

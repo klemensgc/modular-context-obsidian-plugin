@@ -15,8 +15,8 @@ export interface SessionSnapshot {
   glyph: string;
   /** Skill id/label if session was launched from a skill (e.g. "pulse", "process-transcripts") */
   skillName?: string;
-  /** Agent state at capture time */
-  agentStatus?: "working" | "to-review" | "dismissed";
+  /** Agent state at capture time ("waiting" restores as attention → working) */
+  agentStatus?: "working" | "to-review" | "dismissed" | "waiting";
   /** Claude Code session UUID bound to this terminal (transcript file name in
    *  ~/.claude/projects/<munged-cwd>/). Enables `claude -r <id>` auto-resume. */
   claudeSessionId?: string;

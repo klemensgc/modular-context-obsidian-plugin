@@ -10,13 +10,15 @@ export const IDLE_SAFETY_MS = 30000;     // idle safety net → to-review regard
 export const REVIVE_BYTES = 200;         // bytes needed to revive from to-review
 export const REVIVE_WINDOW_MS = 5000;    // window for revive byte counting
 export const AUTO_DETECT_WINDOW_MS = 8000; // window for auto-detect
+export const EXT_WAITING_MIN_AGE_MS = 2000; // registry "waiting" must persist before surfacing
+export const EXT_IDLE_MIN_AGE_MS = 8000;    // registry "idle" must persist before → to-review
 
 export interface TrackedSession {
   sessionId: number;
   skillName: string;
   startedAt: number;
   lastActivityAt: number;
-  status: "working" | "to-review" | "dismissed";
+  status: "working" | "to-review" | "dismissed" | "waiting";
   stateChangedAt: number;
   recentOutputBytes: number;
   outputWindowStart: number;
@@ -30,12 +32,17 @@ export interface TrackableSession {
   _lastStdoutAt: number;
   terminal: any;  // xterm.js Terminal
   process: any;   // Node ChildProcess
+  /** Claude Code session UUID, when bound — lets hosts match registry entries. */
+  claudeSessionId?: string | null;
 }
 
 export class AgentTracker {
   tracked: TrackedSession[] = [];
   private listeners: Map<number, (data: Buffer) => void> = new Map();
   private exitListeners: Map<number, () => void> = new Map();
+  /** Per-session timestamp of the last hook-driven transition — used to drop
+   *  registry statuses that predate it (the registry file lags hook events). */
+  private hookStatusAt: Map<number, number> = new Map();
   private onChange: () => void;
 
   constructor(onChange: () => void) {
@@ -78,7 +85,7 @@ export class AgentTracker {
 
     const exitListener = () => {
       const t = this.tracked.find((tr) => tr.sessionId === entry.sessionId);
-      if (t && t.status === "working") {
+      if (t && (t.status === "working" || t.status === "waiting")) {
         t.status = "to-review";
         t.stateChangedAt = Date.now();
         this.onChange();
@@ -106,6 +113,7 @@ export class AgentTracker {
     this.tracked = this.tracked.filter((t) => t.sessionId !== sessionId);
     this.listeners.delete(sessionId);
     this.exitListeners.delete(sessionId);
+    this.hookStatusAt.delete(sessionId);
     this.onChange();
   }
 
@@ -126,6 +134,10 @@ export class AgentTracker {
     return this.tracked.filter((t) => t.status === "to-review");
   }
 
+  getWaiting(): TrackedSession[] {
+    return this.tracked.filter((t) => t.status === "waiting");
+  }
+
   /** Read status for a given session id, or undefined if not tracked */
   getStatus(sessionId: number): TrackedSession["status"] | undefined {
     return this.tracked.find((t) => t.sessionId === sessionId)?.status;
@@ -134,6 +146,89 @@ export class AgentTracker {
   /** Read the TrackedSession entry for a given session id (exposes skillName, lastActivityAt) */
   getTracked(sessionId: number): TrackedSession | undefined {
     return this.tracked.find((t) => t.sessionId === sessionId);
+  }
+
+  /** Start tracking a session with an externally-determined status (registry-driven). */
+  private trackExternal(session: TrackableSession, status: TrackedSession["status"]): TrackedSession {
+    const now = Date.now();
+    const entry: TrackedSession = {
+      sessionId: session.id,
+      skillName: session.name,
+      startedAt: now,
+      lastActivityAt: now,
+      status,
+      stateChangedAt: now,
+      recentOutputBytes: 0,
+      outputWindowStart: now,
+    };
+    this.tracked.push(entry);
+    this.attachListeners(session, entry);
+    return entry;
+  }
+
+  /** Authoritative status from the Claude CLI registry (~/.claude/sessions/).
+   *  Called by the host when a live registry entry exists for the session's
+   *  claudeSessionId — the CLI's own reporting wins over buffer heuristics,
+   *  bypassing MIN_DWELL (the age thresholds provide the hysteresis instead).
+   *  statusAgeMs = now - statusUpdatedAt of the registry entry.
+   *  source "hook" marks deep-integration hook events (instant, fresher than
+   *  the registry file) — a registry "busy" written BEFORE the last hook
+   *  transition is stale and must not revive the session the hook just moved. */
+  applyExternalStatus(
+    session: TrackableSession,
+    ext: "busy" | "idle" | "waiting",
+    statusAgeMs: number,
+    source: "registry" | "hook" = "registry",
+  ) {
+    const now = Date.now();
+    const t = this.tracked.find((tr) => tr.sessionId === session.id);
+    if (source === "hook") {
+      this.hookStatusAt.set(session.id, now);
+    } else if (ext === "busy") {
+      const hookAt = this.hookStatusAt.get(session.id);
+      if (hookAt !== undefined && now - statusAgeMs <= hookAt) return; // stale pre-hook busy
+    }
+
+    if (ext === "busy") {
+      if (!t) {
+        // Auto-track: the CLI says it's busy even if buffer heuristics never fired.
+        this.trackExternal(session, "working");
+        this.onChange();
+      } else if (t.status !== "working") {
+        // Revive from to-review / dismissed / waiting.
+        t.status = "working";
+        t.stateChangedAt = now;
+        t.recentOutputBytes = 0;
+        this.onChange();
+      }
+      return;
+    }
+
+    if (ext === "waiting") {
+      if (statusAgeMs < EXT_WAITING_MIN_AGE_MS) return; // ignore momentary flicker
+      if (!t) {
+        // Claude is blocked on the user — surface it even if the busy phase was missed.
+        this.trackExternal(session, "waiting");
+        this.onChange();
+      } else if (t.status !== "waiting" && t.status !== "dismissed") {
+        t.status = "waiting";
+        t.stateChangedAt = now;
+        t.recentOutputBytes = 0;
+        this.onChange();
+      }
+      return;
+    }
+
+    // ext === "idle" — a finished turn. Untracked/never-busy session → no card
+    // (a freshly opened prompt shouldn't create review noise).
+    if (statusAgeMs < EXT_IDLE_MIN_AGE_MS) return;
+    if (!t) return;
+    if (t.status === "working" || t.status === "waiting") {
+      t.status = "to-review";
+      t.stateChangedAt = now;
+      t.recentOutputBytes = 0;
+      this.onChange();
+    }
   }
 
   /** Read recent non-empty lines from terminal buffer (public helper used by snapshot capture) */
@@ -296,6 +391,27 @@ export class AgentTracker {
         const recentlyActive = session._lastStdoutAt > 0 && now - session._lastStdoutAt < AUTO_DETECT_WINDOW_MS;
         if (recentlyActive && this.isClaudeCodeActive(session)) {
           t.status = "working";
+          t.stateChangedAt = now;
+          t.recentOutputBytes = 0;
+          changed = true;
+        }
+      }
+      else if (t.status === "waiting") {
+        // Fallback only — waiting is normally registry-driven; this branch is
+        // reached when the registry entry vanished mid-wait (process exit is
+        // handled by the exit listener). Revive on output, decay on shell prompt.
+        if (dwellMs < MIN_DWELL_MS) continue;
+        const session = sessions.find((s) => s.id === t.sessionId);
+        if (!session) continue;
+
+        if (t.recentOutputBytes > REVIVE_BYTES && this.isClaudeCodeActive(session)) {
+          t.status = "working";
+          t.stateChangedAt = now;
+          t.recentOutputBytes = 0;
+          changed = true;
+        }
+        else if (this.isShellPrompt(session)) {
+          t.status = "to-review";
           t.stateChangedAt = now;
           t.recentOutputBytes = 0;
           changed = true;
