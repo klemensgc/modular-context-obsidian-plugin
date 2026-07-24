@@ -45,6 +45,9 @@ export class EditorPane {
   private currentPath: string | null = null;
   private saveTimer: number | null = null;
   private dirty = false;
+  /** Timestamp of our last write — used to ignore the watcher echo of our own save. */
+  private lastSaveAt = 0;
+  private conflictBanner: HTMLElement | null = null;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -68,6 +71,11 @@ export class EditorPane {
 
   async open(path: string) {
     console.log("[EditorPane] open() called with path:", path);
+    // Navigating away from an unresolved conflict = the disk version wins
+    if (this.conflictBanner) {
+      this.dismissConflictBanner();
+      this.dirty = false;
+    }
     if (this.dirty && this.currentPath) {
       await this.save();
     }
@@ -173,15 +181,85 @@ export class EditorPane {
 
   async save() {
     if (!this.textarea || !this.currentPath || !this.dirty) return;
+    // A conflict banner means the file changed under us — autosave must not
+    // clobber the on-disk version until the user picks Reload / Keep mine.
+    if (this.conflictBanner) return;
     const mcVault = (window as any).mcVault as McVaultApi;
     const content = this.textarea.value;
     try {
+      this.lastSaveAt = Date.now();
       await mcVault.writeFile(this.currentPath, content);
       this.dirty = false;
       this.updateHeader();
     } catch (err) {
       console.error("[EditorPane] Save failed:", err);
     }
+  }
+
+  /** Called by the renderer when the vault watcher reports a modify event.
+   *  An agent in the terminal pane editing the open file is the everyday case —
+   *  without this, the 1.5s autosave would silently overwrite the agent's work. */
+  async handleExternalChange(path: string) {
+    if (!this.textarea || !this.currentPath || path !== this.currentPath) return;
+    // Watcher echo of our own save (awaitWriteFinish gives ~300-400ms lag)
+    if (Date.now() - this.lastSaveAt < 2000) return;
+
+    if (!this.dirty) {
+      // No local edits — silently reload, keep cursor/scroll where they were
+      const mcVault = (window as any).mcVault as McVaultApi;
+      try {
+        const content = await mcVault.readFile(path);
+        const ta = this.textarea;
+        const { selectionStart, selectionEnd, scrollTop } = ta;
+        ta.value = content;
+        ta.selectionStart = Math.min(selectionStart, content.length);
+        ta.selectionEnd = Math.min(selectionEnd, content.length);
+        ta.scrollTop = scrollTop;
+      } catch (err) {
+        console.error("[EditorPane] External reload failed:", err);
+      }
+      return;
+    }
+
+    // Local edits + external change = real conflict. Pause autosave, ask the user.
+    if (this.saveTimer) clearTimeout(this.saveTimer);
+    this.showConflictBanner(path);
+  }
+
+  private showConflictBanner(path: string) {
+    if (this.conflictBanner) return;
+    const banner = document.createElement("div");
+    banner.className = "mc-app-editor-conflict";
+
+    const msg = document.createElement("span");
+    msg.textContent = "File changed on disk (likely an agent). Your unsaved edits conflict.";
+    banner.appendChild(msg);
+
+    const reloadBtn = document.createElement("button");
+    reloadBtn.textContent = "Reload from disk";
+    reloadBtn.addEventListener("click", async () => {
+      this.dismissConflictBanner();
+      this.dirty = false;
+      await this.open(path);
+    });
+    banner.appendChild(reloadBtn);
+
+    const keepBtn = document.createElement("button");
+    keepBtn.textContent = "Keep my version";
+    keepBtn.addEventListener("click", () => {
+      this.dismissConflictBanner();
+      void this.save();
+    });
+    banner.appendChild(keepBtn);
+
+    this.conflictBanner = banner;
+    this.container.insertBefore(banner, this.hostEl);
+    this.updateHeader();
+  }
+
+  private dismissConflictBanner() {
+    this.conflictBanner?.remove();
+    this.conflictBanner = null;
   }
 
   private updateHeader() {
@@ -195,6 +273,7 @@ export class EditorPane {
 
   destroy() {
     if (this.saveTimer) clearTimeout(this.saveTimer);
+    this.dismissConflictBanner();
     this.textarea = null;
   }
 }

@@ -4,7 +4,15 @@
     "rootDir": "./src",
     "outDir": "./dist",
     "noEmit": true,
-    "jsx": "react"
+    "jsx": "react",
+    "baseUrl": ".",
+    // Type-level dedupe of @codemirror/state + view: npm hoists a second copy
+    // for the plugin's obsidian dependency, and mixed type identities break
+    // keymap/extension assignability. Runtime dedupe lives in esbuild.renderer.mjs.
+    "paths": {
+      "@codemirror/state": ["./node_modules/@codemirror/state", "../../node_modules/@codemirror/state"],
+      "@codemirror/view": ["./node_modules/@codemirror/view", "../../node_modules/@codemirror/view"]
+    }
   },
   "include": ["src/**/*.ts"]
 }

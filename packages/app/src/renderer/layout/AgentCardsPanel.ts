@@ -41,7 +41,7 @@ export class AgentCardsPanel {
       section.appendChild(title);
 
       for (const tracked of working) {
-        const session = this.manager.sessions.find((s) => s.id === tracked.sessionId);
+        const session = this.manager.sessions.find((s) => s.id === tracked.sessionId) as any;
         if (!session) continue;
         const card = this.buildCard(session.id, session.name, session.glyph, "working", tracked.stateChangedAt);
         section.appendChild(card);
@@ -59,7 +59,7 @@ export class AgentCardsPanel {
       section.appendChild(title);
 
       for (const tracked of review) {
-        const session = this.manager.sessions.find((s) => s.id === tracked.sessionId);
+        const session = this.manager.sessions.find((s) => s.id === tracked.sessionId) as any;
         if (!session) continue;
         const card = this.buildCard(session.id, session.name, session.glyph, "review", tracked.stateChangedAt);
         card.addEventListener("click", () => {

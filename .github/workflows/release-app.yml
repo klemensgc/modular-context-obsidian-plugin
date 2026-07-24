@@ -1,0 +1,70 @@
+# =============================================================================
+#  Release Modular Context desktop app (Electron DMG, macOS arm64) — PREVIEW
+# =============================================================================
+#  ⚠️  NIE ODPALAĆ BEZ JAWNEJ ZGODY USERA.
+#      Blast radius: publikuje publiczny asset na GitHub Releases (widoczny dla
+#      wszystkich). To jest build PREVIEW/EXPERIMENTAL, niepodpisany (adhoc),
+#      nienotaryzowany — Gatekeeper zablokuje przy pierwszym otwarciu.
+#
+#  Dlaczego workflow_dispatch (a NIE push tagu)?
+#      Istniejący release.yml ma trigger `tags: ["*"]` — złapałby każdy tag,
+#      także `app-v*`, i odpalił build pluginu. Żeby uniknąć podwójnego/
+#      kolidującego release, ten workflow odpala się TYLKO ręcznie i dokłada
+#      DMG do JUŻ ISTNIEJĄCEGO release'u pluginu (ten sam tag, np. 2.1.4).
+#
+#  Artefakt ląduje pod STAŁĄ nazwą ModularContext-arm64.dmg, więc link
+#      /releases/latest/download/ModularContext-arm64.dmg jest deterministyczny.
+# =============================================================================
+name: Release desktop app (DMG · preview)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Istniejący release tag, do którego dołączyć DMG (np. 2.1.4)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-mac:
+    # macos-14 = Apple Silicon runner (arm64). Mac DMG NIE zbuduje się na ubuntu.
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Build DMG (electron-builder, --publish never)
+        working-directory: packages/app
+        run: npm run dist
+
+      - name: Locate, rename to stable name, checksum
+        id: artifact
+        working-directory: packages/app/dist-app
+        run: |
+          src="$(ls ModularContext-*-arm64.dmg | head -1)"
+          if [ -z "$src" ]; then echo "::error::Brak zbudowanego DMG"; exit 1; fi
+          cp "$src" ModularContext-arm64.dmg
+          shasum -a 256 ModularContext-arm64.dmg | tee ModularContext-arm64.dmg.sha256
+          echo "built=$src" >> "$GITHUB_OUTPUT"
+
+      - name: Upload DMG + checksum to existing release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        working-directory: packages/app/dist-app
+        run: |
+          tag="${{ github.event.inputs.tag }}"
+          # release musi już istnieć (utworzony przez release.yml dla pluginu). --clobber nadpisuje stary DMG.
+          gh release upload "$tag" \
+            ModularContext-arm64.dmg \
+            ModularContext-arm64.dmg.sha256 \
+            --clobber

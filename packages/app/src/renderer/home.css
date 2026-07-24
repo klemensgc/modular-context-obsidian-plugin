@@ -1,0 +1,678 @@
+/* --- Home dashboard (launcher) --- */
+
+.mc-home {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  padding-top: 34px; /* title bar */
+  background:
+    radial-gradient(120% 80% at 70% 0%, rgba(209, 109, 16, 0.06), transparent 60%),
+    var(--mc-bg);
+  animation: mc-home-in 0.35s ease both;
+}
+
+@keyframes mc-home-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Left rail */
+.mc-home-sidebar {
+  width: 290px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: rgba(0, 0, 0, 0.18);
+  border-right: 1px solid var(--mc-border);
+}
+
+.mc-home-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 18px 14px;
+  -webkit-app-region: drag;
+}
+.mc-home-brand .mc-ros-signet { color: var(--mc-fg); opacity: 0.9; }
+.mc-home-brand-text { display: flex; flex-direction: column; line-height: 1.25; }
+.mc-home-brand-text strong { font-size: 13px; font-weight: 650; letter-spacing: -0.01em; }
+.mc-home-brand-text span { font-size: 10px; color: var(--mc-fg-dim); letter-spacing: 0.04em; }
+
+.mc-home-label {
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.1em;
+  color: var(--mc-fg-dim);
+  padding: 8px 20px 8px;
+}
+
+.mc-home-vaults {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.mc-home-vault {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 12px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: background 0.14s ease, border-color 0.14s ease, transform 0.14s ease;
+}
+.mc-home-vault:hover {
+  background: rgba(255, 255, 255, 0.04);
+  transform: translateX(2px);
+}
+.mc-home-vault.is-active {
+  background: rgba(209, 109, 16, 0.1);
+  border-color: rgba(209, 109, 16, 0.4);
+}
+.mc-home-vault-glyph {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  color: var(--mc-fg-dim);
+  transition: color 0.14s ease;
+}
+.mc-home-vault.is-active .mc-home-vault-glyph,
+.mc-home-vault:hover .mc-home-vault-glyph { color: var(--mc-accent); }
+.mc-home-vault-glyph svg { width: 100%; height: 100%; }
+.mc-home-vault-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.mc-home-vault-name {
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--mc-fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mc-home-vault-pin { color: var(--mc-accent); font-size: 9px; margin-left: 5px; }
+.mc-home-vault-meta { font-size: 10.5px; color: var(--mc-fg-dim); }
+
+.mc-home-actions {
+  flex-shrink: 0;
+  padding: 12px;
+  border-top: 1px solid var(--mc-border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mc-home-new {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: rgba(209, 109, 16, 0.1);
+  border: 1px solid rgba(209, 109, 16, 0.35);
+  border-radius: 9px;
+  color: var(--mc-accent);
+  font-size: 12.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.14s ease;
+}
+.mc-home-new:hover { background: rgba(209, 109, 16, 0.18); }
+.mc-home-new-plus { font-size: 15px; line-height: 1; }
+.mc-home-open-other {
+  background: transparent;
+  border: none;
+  color: var(--mc-fg-muted);
+  font-size: 11.5px;
+  font-family: inherit;
+  padding: 5px;
+  cursor: pointer;
+}
+.mc-home-open-other:hover { color: var(--mc-fg); }
+
+/* Detail pane: main column (title/stats/graph/enter) + backlog aside */
+.mc-home-detail {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: row;
+  gap: 30px;
+  padding: 40px 40px;
+  overflow: hidden;
+}
+.mc-home-detail-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  animation: mc-detail-in 0.3s ease both;
+}
+@keyframes mc-detail-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.mc-home-detail-head { margin-bottom: 18px; }
+.mc-home-detail-title {
+  margin: 0;
+  font-size: 30px;
+  font-weight: 680;
+  letter-spacing: -0.02em;
+  color: #f2f2f2;
+}
+.mc-home-detail-path {
+  font-size: 11.5px;
+  color: var(--mc-fg-dim);
+  font-family: ui-monospace, monospace;
+  margin-top: 4px;
+}
+
+.mc-home-stats {
+  display: flex;
+  gap: 28px;
+  margin-bottom: 20px;
+}
+.mc-home-stat { display: flex; flex-direction: column; gap: 2px; }
+.mc-home-stat-value { font-size: 22px; font-weight: 650; color: var(--mc-fg); letter-spacing: -0.01em; }
+.mc-home-stat-label { font-size: 10px; color: var(--mc-fg-dim); text-transform: uppercase; letter-spacing: 0.06em; }
+
+/* Mini knowledge-graph stage */
+.mc-home-graph-stage {
+  position: relative;
+  flex: 1;
+  min-height: 380px;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--mc-border);
+  background:
+    radial-gradient(70% 70% at 50% 50%, rgba(209, 109, 16, 0.05), transparent 70%),
+    rgba(0, 0, 0, 0.22);
+  /* No bottom margin: the panel fills the column so it matches the backlog box height. */
+}
+
+/* Top-left overlay: vault name + path + stats laid over the graph canvas.
+   A soft scrim keeps the text legible against busy node clusters. */
+.mc-home-graph-overlay-tl {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 3;
+  padding: 18px 20px 28px;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(13, 13, 13, 0.78) 0%, rgba(13, 13, 13, 0.4) 55%, transparent 100%);
+}
+.mc-home-graph-overlay-tl .mc-home-detail-head { margin-bottom: 12px; }
+.mc-home-graph-overlay-tl .mc-home-detail-title { font-size: 26px; text-shadow: 0 1px 12px rgba(0, 0, 0, 0.6); }
+.mc-home-graph-overlay-tl .mc-home-stats { gap: 22px; margin-bottom: 0; }
+.mc-home-graph-overlay-tl .mc-home-stat-value { font-size: 19px; text-shadow: 0 1px 10px rgba(0, 0, 0, 0.55); }
+
+/* Last GitHub sync line, sitting just under the stats. */
+.mc-home-sync {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  font-size: 11px;
+  color: var(--mc-fg-dim);
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.6);
+}
+/* Clickable: fires /log. Re-enables pointer events (overlay-tl is pass-through). */
+.mc-home-sync-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px;
+  margin: -3px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  opacity: 0.85;
+  cursor: pointer;
+  border-radius: 6px;
+  pointer-events: auto;
+  transition: color 0.14s ease, background 0.14s ease, transform 0.14s ease, opacity 0.14s ease;
+}
+.mc-home-sync-icon svg { width: 12px; height: 12px; }
+.mc-home-sync-icon:hover { color: var(--mc-accent); opacity: 1; background: rgba(209, 109, 16, 0.14); transform: rotate(60deg); }
+.mc-home-sync[data-state="ok"] { color: var(--mc-fg-muted); }
+.mc-home-sync[data-state="ok"] .mc-home-sync-icon { color: #5fb87a; opacity: 1; }
+.mc-home-sync[data-state="warn"] .mc-home-sync-icon { color: var(--mc-accent); opacity: 1; }
+.mc-home-graph-glow {
+  position: absolute;
+  inset: -20% 10% auto 10%;
+  height: 60%;
+  background: radial-gradient(50% 50% at 50% 0%, rgba(209, 109, 16, 0.14), transparent 70%);
+  pointer-events: none;
+  animation: mc-glow-breathe 6s ease-in-out infinite;
+}
+@keyframes mc-glow-breathe {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+.mc-home-graph.mc-graph-overlay { background: transparent; }
+.mc-home-graph-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--mc-fg-dim);
+  pointer-events: none;
+}
+
+/* Big enter button */
+.mc-home-open {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 26px;
+  background: linear-gradient(135deg, #d16d10, #e07d22);
+  border: none;
+  border-radius: 11px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 650;
+  font-family: inherit;
+  cursor: pointer;
+  box-shadow: 0 6px 22px rgba(209, 109, 16, 0.28);
+  transition: transform 0.14s ease, box-shadow 0.14s ease;
+}
+.mc-home-open:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 30px rgba(209, 109, 16, 0.4);
+}
+.mc-home-open:active { transform: translateY(0); }
+.mc-home-open-arrow { transition: transform 0.18s ease; }
+.mc-home-open:hover .mc-home-open-arrow { transform: translateX(4px); }
+
+/* First-run hero */
+.mc-home-hero {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  text-align: center;
+  -webkit-app-region: drag;
+}
+.mc-home-hero .mc-ros-loader { opacity: 0.9; -webkit-app-region: no-drag; }
+.mc-home-hero-title {
+  margin: 8px 0 0;
+  font-size: 26px;
+  font-weight: 680;
+  letter-spacing: -0.02em;
+  color: #f2f2f2;
+}
+.mc-home-hero-tagline { font-size: 13px; color: var(--mc-fg-muted); max-width: 380px; }
+.mc-home-hero-cta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+  -webkit-app-region: no-drag;
+}
+
+/* Backlog aside (ingest inbox + focus + synthesise) */
+.mc-home-backlog {
+  width: 320px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--mc-border);
+  border-radius: 14px;
+  padding: 16px 16px 14px;
+  animation: mc-detail-in 0.35s ease 0.05s both;
+}
+.mc-home-backlog-header {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--mc-fg-muted);
+}
+.mc-home-backlog-sub {
+  font-size: 11px;
+  color: var(--mc-fg-dim);
+  margin: 3px 0 12px;
+}
+.mc-home-backlog-list {
+  flex: 1;
+  min-height: 80px;
+  max-height: 38%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 14px;
+}
+.mc-home-backlog-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid transparent;
+  transition: border-color 0.12s ease;
+}
+.mc-home-backlog-item:hover { border-color: var(--mc-border-strong); }
+.mc-home-backlog-name {
+  font-size: 12px;
+  color: var(--mc-fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mc-home-backlog-meta { font-size: 10px; color: var(--mc-fg-dim); }
+.mc-home-backlog-empty {
+  font-size: 11.5px;
+  color: var(--mc-fg-dim);
+  line-height: 1.6;
+  padding: 14px 4px;
+}
+.mc-home-backlog-empty span { font-size: 10.5px; }
+.mc-home-backlog-empty code {
+  font-family: ui-monospace, monospace;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 3px;
+  padding: 0 4px;
+}
+
+.mc-home-backlog-focus-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--mc-fg-muted);
+  margin-bottom: 6px;
+}
+.mc-home-backlog-focus {
+  flex: 1;
+  min-height: 90px;
+  resize: none;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--mc-border);
+  border-radius: 9px;
+  color: var(--mc-fg);
+  font-size: 12px;
+  line-height: 1.5;
+  font-family: inherit;
+  padding: 10px 11px;
+  outline: none;
+  margin-bottom: 12px;
+  transition: border-color 0.12s ease;
+}
+.mc-home-backlog-focus:focus { border-color: var(--mc-accent-muted); }
+.mc-home-backlog-focus::placeholder { color: var(--mc-fg-dim); }
+
+.mc-home-synth {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px;
+  background: linear-gradient(135deg, #d16d10, #e07d22);
+  border: none;
+  border-radius: 10px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 650;
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  cursor: pointer;
+  box-shadow: 0 4px 18px rgba(209, 109, 16, 0.26);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
+}
+.mc-home-synth:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 26px rgba(209, 109, 16, 0.4);
+}
+.mc-home-synth:disabled {
+  opacity: 0.4;
+  cursor: default;
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: none;
+}
+.mc-home-synth-icon { display: inline-flex; align-items: center; }
+.mc-home-synth-icon svg { width: 14px; height: 14px; }
+
+/* Backlog: per-file rows with comment toggle + drop-zone state */
+.mc-home-backlog.is-drop {
+  border-color: var(--mc-accent);
+  background: rgba(209, 109, 16, 0.08);
+}
+.mc-home-backlog-list { max-height: none; flex: 1; }
+.mc-home-backlog-item {
+  padding: 8px 9px;
+  gap: 6px;
+}
+.mc-home-backlog-item-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mc-home-backlog-item-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.mc-home-comment-btn {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--mc-fg-dim);
+  cursor: pointer;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+.mc-home-comment-btn:hover { background: rgba(255,255,255,0.06); color: var(--mc-fg); }
+.mc-home-comment-btn.has-note { color: var(--mc-accent); }
+.mc-home-comment-field {
+  width: 100%;
+  min-height: 52px;
+  resize: vertical;
+  margin-top: 7px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--mc-accent-muted);
+  border-radius: 8px;
+  color: var(--mc-fg);
+  font-size: 11.5px;
+  line-height: 1.5;
+  font-family: inherit;
+  padding: 8px 9px;
+  outline: none;
+}
+.mc-home-comment-field::placeholder { color: var(--mc-fg-dim); }
+
+.mc-home-remove-btn {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--mc-fg-dim);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+.mc-home-backlog-item:hover .mc-home-remove-btn { opacity: 1; }
+.mc-home-remove-btn:hover { color: #e06c6c; background: rgba(224, 108, 108, 0.12); }
+
+/* --- Bottom overlay over the graph: prompt field + sleek move chips --- */
+.mc-home-graph-overlay-bottom {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 60; /* above the graph canvas (z-index: 50) so it stays clickable */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 60px 20px 22px;
+  pointer-events: none; /* let graph drag through the gaps… */
+  background: linear-gradient(0deg, rgba(13, 13, 13, 0.82) 0%, rgba(13, 13, 13, 0.45) 55%, transparent 100%);
+}
+.mc-home-graph-overlay-bottom > * { pointer-events: auto; } /* …but not the controls */
+
+/* Sleek minimal move chips, sized to match the prompt pill. */
+.mc-home-moves {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+.mc-home-move {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 14px 7px 11px;
+  background: rgba(20, 20, 20, 0.72);
+  border: 1px solid var(--mc-border-strong);
+  border-radius: 999px;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--mc-fg-muted);
+  backdrop-filter: blur(6px);
+  transition: border-color 0.14s ease, background 0.14s ease, color 0.14s ease, transform 0.14s ease;
+}
+.mc-home-move:hover {
+  border-color: var(--mc-accent);
+  background: rgba(209, 109, 16, 0.14);
+  color: var(--mc-fg);
+  transform: translateY(-1px);
+}
+.mc-home-move-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--mc-accent);
+}
+.mc-home-move-icon svg { width: 14px; height: 14px; }
+.mc-home-move-label { font-size: 12.5px; font-weight: 600; letter-spacing: -0.01em; }
+
+.mc-home-open-plain {
+  margin-top: 2px;
+  background: transparent;
+  border: none;
+  color: var(--mc-fg-dim);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 2px 6px;
+  transition: color 0.14s ease;
+}
+.mc-home-open-plain:hover { color: var(--mc-fg-muted); }
+
+/* --- Free-form prompt field (above the moves) --- */
+/* The first-prompt field: a solid, accent-lit pill, pressed low over the
+   graph. The signet on the right is the send button. */
+.mc-home-prompt {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: min(480px, 88%);
+  margin: 0 auto;
+  border-radius: 999px;
+  isolation: isolate;
+}
+.mc-home-prompt-input {
+  flex: 1;
+  min-width: 0;
+  background: #1b1b1b;
+  border: 1px solid var(--mc-accent);
+  border-radius: 999px;
+  color: var(--mc-fg);
+  font-size: 14px;
+  font-family: inherit;
+  padding: 13px 52px 13px 20px;
+  outline: none;
+  box-shadow: 0 0 0 1px rgba(209, 109, 16, 0.18), 0 14px 34px -10px rgba(0, 0, 0, 0.85), 0 6px 18px -8px rgba(209, 109, 16, 0.45);
+  transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+}
+.mc-home-prompt-input::placeholder { color: var(--mc-fg-muted); }
+.mc-home-prompt-input:focus {
+  border-color: var(--mc-accent);
+  background: #1f1f1f;
+  box-shadow: 0 0 0 3px rgba(209, 109, 16, 0.22), 0 16px 38px -10px rgba(0, 0, 0, 0.9), 0 8px 22px -8px rgba(209, 109, 16, 0.6);
+}
+
+/* Send = the signet monogram, circular and accent-lit. */
+.mc-home-prompt-send {
+  position: absolute;
+  right: 5px;
+  top: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--mc-accent);
+  color: #fff;
+  cursor: pointer;
+  transform: translateY(-50%);
+  box-shadow: 0 2px 10px -2px rgba(209, 109, 16, 0.6);
+  transition: transform 0.16s ease, box-shadow 0.16s ease, opacity 0.2s ease, background 0.16s ease;
+}
+.mc-home-prompt-send .mc-ros-signet { opacity: 0.96; }
+.mc-home-prompt-send:hover {
+  transform: translateY(-50%) scale(1.09);
+  box-shadow: 0 5px 18px -2px rgba(209, 109, 16, 0.85);
+}
+.mc-home-prompt-send:active { transform: translateY(-50%) scale(0.93); }
+
+/* A ripple wave radiates from the send button on launch. */
+.mc-home-prompt-send::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--mc-accent);
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Launch: a soft pulse on the signet + an expanding wave ring (~0.5s),
+   then the prompt fires. No spin. */
+.mc-home-prompt.is-launching .mc-home-prompt-send {
+  animation: mc-signet-pulse 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.mc-home-prompt.is-launching .mc-home-prompt-send::after {
+  animation: mc-signet-wave 0.5s cubic-bezier(0.2, 0.6, 0.3, 1) forwards;
+}
+.mc-home-prompt.is-launching .mc-home-prompt-input {
+  border-color: var(--mc-accent);
+  box-shadow: 0 0 0 3px rgba(209, 109, 16, 0.22), 0 10px 28px -10px rgba(209, 109, 16, 0.6);
+}
+@keyframes mc-signet-pulse {
+  0%   { transform: translateY(-50%) scale(1); box-shadow: 0 2px 10px -2px rgba(209, 109, 16, 0.6); }
+  35%  { transform: translateY(-50%) scale(1.14); box-shadow: 0 4px 18px -2px rgba(209, 109, 16, 0.9); }
+  100% { transform: translateY(-50%) scale(1); box-shadow: 0 2px 10px -2px rgba(209, 109, 16, 0.6); }
+}
+@keyframes mc-signet-wave {
+  0%   { transform: scale(1); opacity: 0.65; }
+  100% { transform: scale(2.6); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mc-home-prompt.is-launching .mc-home-prompt-send,
+  .mc-home-prompt.is-launching .mc-home-prompt-send::after { animation: none; }
+}

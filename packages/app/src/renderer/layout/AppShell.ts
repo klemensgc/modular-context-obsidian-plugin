@@ -5,6 +5,9 @@ export interface AppShellElements {
   treeEl: HTMLElement;
   editorEl: HTMLElement;
   terminalEl: HTMLElement;
+  /** Hide the reader/editor column so the terminal (chat) fills the space.
+   *  Used when launching a skill/agent with no file open yet. */
+  setReaderVisible(visible: boolean): void;
 }
 
 interface PaneSizes {
@@ -17,7 +20,11 @@ const DEFAULT_SIZES: PaneSizes = { tree: 280, terminal: 420 };
 const MIN_TREE = 180;
 const MAX_TREE = 520;
 const MIN_TERMINAL = 280;
-const MAX_TERMINAL = 720;
+
+/** Terminal may take over the reader — up to 85% of the window. */
+function maxTerminal(): number {
+  return Math.round(window.innerWidth * 0.85);
+}
 
 function loadSizes(): PaneSizes {
   try {
@@ -26,7 +33,7 @@ function loadSizes(): PaneSizes {
     const parsed = JSON.parse(raw);
     return {
       tree: clamp(parsed.tree ?? DEFAULT_SIZES.tree, MIN_TREE, MAX_TREE),
-      terminal: clamp(parsed.terminal ?? DEFAULT_SIZES.terminal, MIN_TERMINAL, MAX_TERMINAL),
+      terminal: clamp(parsed.terminal ?? DEFAULT_SIZES.terminal, MIN_TERMINAL, maxTerminal()),
     };
   } catch {
     return { ...DEFAULT_SIZES };
@@ -52,8 +59,11 @@ export function createAppShell(root: HTMLElement): AppShellElements {
   root.appendChild(shellEl);
 
   const sizes = loadSizes();
+  let readerVisible = true;
   const updateGrid = () => {
-    shellEl.style.gridTemplateColumns = `${sizes.tree}px 4px 1fr 4px ${sizes.terminal}px`;
+    shellEl.style.gridTemplateColumns = readerVisible
+      ? `${sizes.tree}px 4px 1fr 4px ${sizes.terminal}px`
+      : `${sizes.tree}px 4px 0px 0px 1fr`; // reader collapsed → terminal/chat fills
   };
   updateGrid();
 
@@ -99,7 +109,7 @@ export function createAppShell(root: HTMLElement): AppShellElements {
       if (side === "tree") {
         sizes.tree = clamp(startSize + delta, MIN_TREE, MAX_TREE);
       } else {
-        sizes.terminal = clamp(startSize - delta, MIN_TERMINAL, MAX_TERMINAL);
+        sizes.terminal = clamp(startSize - delta, MIN_TERMINAL, maxTerminal());
       }
       updateGrid();
     });
@@ -121,5 +131,14 @@ export function createAppShell(root: HTMLElement): AppShellElements {
   wireSplitter(splitter1, "tree");
   wireSplitter(splitter2, "terminal");
 
-  return { treeEl, editorEl, terminalEl };
+  function setReaderVisible(visible: boolean) {
+    if (readerVisible === visible) return;
+    readerVisible = visible;
+    editorEl.style.display = visible ? "" : "none";
+    splitter2.style.display = visible ? "" : "none";
+    updateGrid();
+    window.dispatchEvent(new CustomEvent("mc:panes-resized"));
+  }
+
+  return { treeEl, editorEl, terminalEl, setReaderVisible };
 }

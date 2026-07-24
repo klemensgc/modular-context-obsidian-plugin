@@ -1,0 +1,65 @@
+/* Graph view — Obsidian-style note graph overlay (GraphView.ts). */
+
+.mc-graph-overlay {
+  position: absolute;
+  inset: 0;
+  background: var(--mc-bg-editor);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+}
+
+.mc-graph-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--mc-border);
+  font-size: 11px;
+  color: var(--mc-fg-muted);
+  user-select: none;
+  -webkit-app-region: no-drag;
+}
+
+.mc-graph-stat {
+  font-size: 11px;
+  color: var(--mc-fg-muted);
+  letter-spacing: 0.01em;
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+}
+
+.mc-graph-toolbar-spacer {
+  flex: 1;
+}
+
+.mc-graph-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--mc-fg-dim);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.1s ease;
+}
+
+.mc-graph-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--mc-fg);
+}
+
+.mc-graph-canvas {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: block;
+  background: transparent;
+}

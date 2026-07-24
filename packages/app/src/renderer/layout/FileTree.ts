@@ -123,7 +123,8 @@ export class FileTree {
     const item = document.createElement("div");
     item.className = "mc-app-tree-item";
     item.dataset.path = node.path;
-    item.style.paddingLeft = `${6 + depth * 14}px`;
+    // Tight Obsidian-like indent — small step per hierarchy level
+    item.style.paddingLeft = `${8 + depth * 12}px`;
     if (node.path === this.activePath) item.classList.add("is-active");
 
     const chevron = document.createElement("span");

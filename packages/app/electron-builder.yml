@@ -6,6 +6,9 @@ files:
   - dist/**/*
   - package.json
   - assets/icon.icns
+extraResources:
+  - from: templates
+    to: templates
 asar: true
 npmRebuild: false
 buildDependenciesFromSource: false
@@ -13,6 +16,11 @@ nodeGypRebuild: false
 mac:
   target:
     - dmg
+  # ARCH: brak `arch:` => buduje TYLKO host arch (Apple Silicon = arm64). Zgodne z honesty barem "macOS arm64 ONLY".
+  #   x64 / universal = TODO — wymaga buildu i testu na Intel, którego nie mamy. NIE deklarować universal jako działającego bez tego.
+  # artifactName: CamelCase bez spacji (productName "Modular Context" zostaje w UI appki, ale plik DMG = ModularContext-2.1.4-arm64.dmg).
+  #   Release job uploaduje go pod STAŁĄ nazwą ModularContext-arm64.dmg, żeby /releases/latest/download/ był deterministyczny między wersjami.
+  artifactName: ModularContext-${version}-${arch}.dmg
   category: public.app-category.productivity
   darkModeSupport: true
   minimumSystemVersion: "11.0"
