@@ -1,7 +1,7 @@
 {
 	"id": "modular-context",
 	"name": "Modular Context",
-	"version": "2.3.0",
+	"version": "2.4.0",
 	"minAppVersion": "0.15.0",
 	"description": "Modular Context | Karpathy LLM Knowledge Base + Gmail & G-Cal — multi-account MCP server, encrypted local-first storage, 25 tools for Claude Code.",
 	"author": "klemensgc / receptionOS",
