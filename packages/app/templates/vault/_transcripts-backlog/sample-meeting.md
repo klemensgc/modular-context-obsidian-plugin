@@ -1,12 +1,11 @@
 ---
 title: "Weekly Product Sync — Brightbill"
+type: spotkanie
+status: stable
 updated: 2026-06-12
-status: draft
-cadence: frozen
 date: 2026-06-10
 duration: 38 minutes
-attendees: Maya Lindqvist (maya@brightbill.app), Jonas Park (jonas@brightbill.app)
-type: transcript
+uczestnicy-nierozpoznani: Maya Lindqvist (maya@brightbill.app), Jonas Park (jonas@brightbill.app)
 ---
 
 # Weekly Product Sync — Brightbill

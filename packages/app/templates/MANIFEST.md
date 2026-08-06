@@ -29,16 +29,20 @@ templates/
 └── vault/                          ← copied verbatim on "Create new vault"
     ├── CLAUDE.md                   ← schema root ({{LANGUAGE}} placeholder)
     ├── .claude/
-    │   └── agents/                 ← 6 agents used by /process-transcripts
-    │       ├── transcript-analyzer.md
-    │       ├── module-scanner.md
-    │       ├── consistency-checker.md
-    │       ├── reweave-scanner.md
-    │       ├── knowledge-weaver.md
-    │       └── ceo-advisor.md      ← vault-owner advisor (filename kept: skills call it by name)
+    │   ├── agents/                 ← 6 agents used by /process-transcripts
+    │   │   ├── transcript-analyzer.md
+    │   │   ├── module-scanner.md
+    │   │   ├── consistency-checker.md
+    │   │   ├── reweave-scanner.md
+    │   │   ├── knowledge-weaver.md
+    │   │   └── ceo-advisor.md      ← vault-owner advisor (filename kept: skills call it by name)
+    │   └── commands/               ← 3 slash commands shipped with the scaffold
+    │       ├── process-files.md    ← ingest for non-transcript files
+    │       ├── synthesise.md       ← combined transcript + file backlog run
+    │       └── decyzja.md          ← "Make the Call" → entry in _decisions-log.md
     ├── _claude/                    ← vault methodology (schema layer)
     │   ├── 1-standards/
-    │   │   ├── frontmatter.md      ← required fields, status values, cadence tiers + staleness formula
+    │   │   ├── frontmatter.md      ← type cascade, edit contracts, status enum, git-based staleness
     │   │   └── linking.md          ← wiki-link conventions
     │   ├── 2-templates/
     │   │   ├── file-standard.md    ← new wiki module template
@@ -66,7 +70,9 @@ templates/
 ## Design notes
 
 - **Language:** all template content is English (EN-first product decision). `CLAUDE.md` carries `Repo language: {{LANGUAGE}}.` so agents respond in the user's language; tags stay English regardless.
-- **Methodology canon:** the template matches the LLM Wiki onboarding prompt in `packages/plugin/main.ts` — 3 layers (RAW SOURCES → WIKI → SCHEMA), 3 operations (INGEST / QUERY / LINT), frontmatter with `title/updated/status/cadence`, cadence tiers hot=7d / tactical=30d / iron-cold=60d / frozen, `{folder}_index.md` hubs, kebab-case, session logs.
+- **Methodology canon (2.0):** the template matches the onboarding prompt in `packages/shared/src/skills/onboarding-prompt.ts`. 3 layers (RAW SOURCES → WIKI → SCHEMA) and 3 operations (INGEST / QUERY / LINT) are unchanged. What 2.0 replaced: the `cadence:` tiers are gone, and with them `depends-on:` and `audience:`. Frontmatter is `title/type/status/updated`; `type:` is mandatory in the wiki layer and drawn from a MECE cascade (`log → spotkanie → event → osoba → deal → modul`); staleness is computed from git history per type (hub 7d / `modul` 60 / `osoba` 180 / active `deal` 30), skipping commits with a `Meta: true` trailer.
+- **`type:` is deliberately absent on non-entities.** The `_claude/` standards, the `.claude/` runtime config and the two folder maps (`_transcripts/transcripts_index.md`, `_workspace/_workspace_index.md`) ship with `title/status/updated` only. A declared type hands a file a staleness budget, which would put the vault's own rulebook on a 60-day clock. Do not "fix" this by adding types. `_transcripts-backlog/sample-meeting.md` is the counter-example that proves the rule: it *is* an entity, so it ships `type: spotkanie`.
+- **Hubs are an explicit list, not a glob.** In this scaffold: `_decisions-log.md` plus every generated project index. The two index files in excluded trees (`_transcripts/`, `_workspace/`) are not hubs.
 - **Agents are self-contained:** reweave-scanner and knowledge-weaver carry their trigger/scoring/relation-type definitions inline (the private vault's `reweave-standards.md` is not part of the minimal template).
 - **Transcript categories:** 7 generic ones (`meetings/product/clients/research/strategy/personal/other`); `category-routing.md` instructs users to specialize the table as their projects grow.
 - **Frontmatter date:** every vault `.md` (except `CLAUDE.md` and `.claude/`) ships with `updated: 2026-06-12`. Scaffold MAY rewrite this to the creation date — optional, not required for correctness.

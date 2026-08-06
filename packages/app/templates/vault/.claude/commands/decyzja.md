@@ -12,7 +12,7 @@ Aplikacja wywołuje Cię przyciskiem **"Make the Call"**. Twoje zadanie: wziąć
 doprowadzić ją do konkluzji — własna rekomendacja, najsilniejszy kontrargument, rama decyzyjna,
 jasny call z jednym ruchem, wpis do logu.
 
-**Reguły nadrzędne (z CLAUDE.md sekcja 9 — egzekwuj je dosłownie):**
+**Reguły nadrzędne (egzekwuj je dosłownie):**
 - **Zero sycophancy.** Nie waliduj decyzji ani premisy zanim odpowiesz. Jeśli pytanie jest źle
   postawione albo premisa fałszywa — powiedz to OD RAZU, na początku, zanim cokolwiek policzysz.
 - **No anchoring (KRYTYCZNE dla tej komendy).** Jeśli user podał liczbę / preferencję / przeczucie
@@ -40,12 +40,13 @@ jak ją rozumiesz, ale NIE pytaj o pozwolenie, jedź dalej.)
 
 Przeskanuj (Read/Grep — NIE blok kodu z wykrzyknikiem, użyj narzędzi):
 
-1. **`1_receptionOS/4-go-to-market/pipeline.md`** — deale przy decyzji (close/no, pricing, oferta).
+1. **Indeksy projektów** (`{N}_{projekt}/{N}_{projekt}_index.md`) → moduły ze `status: needs-update`
+   albo `draft` oraz pliki `type: deal` — decyzje przy dealach (close/no, pricing, oferta).
 2. **2-3 najnowsze logi** z `_claude/4-sessions/{najnowszy-miesiąc}/` (Glob → sortuj malejąco po nazwie)
    — czego nie domknięto, co zostało "pending".
 3. **`_decisions-log.md`** — szukaj wpisów ze `**Status:** OPEN`, "NIE rozstrzygam", "pending",
    "Decision needed", "decyzja w toku". To są nierozwiązane wątki.
-4. **Bieżący quest-board** `1_receptionOS/8-strategy/quest-board-*.md` (jeśli jest aktualny tydzień)
+4. **Huby przekraczające budżet świeżości** (7 dni, liczone z gita — patrz CLAUDE.md §3)
    — priorytety, które utknęły.
 
 Zbierz **1-3 kandydatów na otwartą decyzję**. Dla każdego: jedno zdanie + stake (blast radius)
@@ -71,8 +72,10 @@ Pominięte: [inni kandydaci, jeśli byli]
 **To robisz ZANIM zważysz nastawienie usera.** Jeśli user podał przeczucie/liczbę — w tej fazie
 udawaj, że jej nie znasz. Wyprowadź własną odpowiedź od zera.
 
-1. **Zbierz fakty z vault** — przeczytaj moduły relevantne dla decyzji (pipeline, decisions-log,
-   team-roster, metrics, odpowiedni index). Liczby/daty/nazwiska weryfikuj w plikach, nie z pamięci.
+1. **Zbierz fakty z vault** — przeczytaj moduły relevantne dla decyzji (`_decisions-log.md`,
+   odpowiedni `{folder}_index.md` i moduły, na które wskazuje, karty osób z folderu ludzi).
+   Liczby/daty/nazwiska weryfikuj w plikach, nie z pamięci. Liczba operacyjna w module jest
+   pointerem (`N (stan na RRRR-MM-DD, kanon: X)`) — jeśli decyzja od niej zależy, idź do kanonu.
 2. **Wyprowadź rekomendację niezależnie** — jaki jest najlepszy ruch wg samych faktów + pierwszych
    zasad? Jeśli decyzja ma parametr liczbowy (kwota, termin, %, cena) — **wygeneruj własną wartość**,
    potem dopiero porównaj z tym, co user/vault podawał.
@@ -133,8 +136,11 @@ Jeśli decyzja jest warunkowa, dopuszczalna forma to: "Rób A. Jeśli do [data/t
 
 ## FAZA 5: Zaloguj decyzję
 
-Dopisz ustrukturyzowany wpis na GÓRZE listy decyzji w `_decisions-log.md` (sortowanie: najnowsze
-pierwsze — wstaw zaraz po nagłówku `# Global Decisions Log` / sekcji TL;DR, przed pierwszym `## 20...`).
+Dopisz ustrukturyzowany wpis na GÓRZE listy decyzji w `_decisions-log.md` — w sekcji `## Log`
+(sortowanie: najnowsze pierwsze, wstaw zaraz pod nagłówkiem `## Log`, przed pierwszym `### 20...`).
+Sekcja `## Log` to jedyne miejsce w tym pliku, gdzie legalne są nagłówki datowane. Wpis jest `###` —
+poziom NIŻEJ niż `## Log`, żeby siedział wewnątrz sekcji, a nie ją kończył. Nagłówek `## 20...`
+byłby rodzeństwem `## Log` i odpalił regułę „daty poza sekcją `## Log`" u consistency-checkera.
 
 **Najpierw przeczytaj** `_claude/2-templates/decision-entry.md` jeśli istnieje (szablon wpisu) oraz
 górę `_decisions-log.md` (żeby dopasować dokładny format sąsiednich wpisów).
@@ -142,9 +148,9 @@ górę `_decisions-log.md` (żeby dopasować dokładny format sąsiednich wpisó
 Format wpisu (zgodny z istniejącymi w `_decisions-log.md`):
 
 ```markdown
-## [YYYY-MM-DD]: [DOMENA] — [Tytuł decyzji]
+### [YYYY-MM-DD]: [DOMENA] — [Tytuł decyzji]
 
-**Project:** [ROS / Apolonia / Fundacja / Apollo / Culture] | **Status:** [DECYZJA / OPEN / pending formalizacja] | **Confidence:** [high/moderate/low]
+**Project:** [nazwa projektu z indeksu, albo "cross-project"] | **Status:** [DECYZJA / OPEN / pending formalizacja] | **Confidence:** [high/moderate/low]
 
 **Decyzja:** [Call z FAZY 4 — 1-2 zdania.] **Recommended Next Move:** [jeden ruch.]
 
@@ -172,7 +178,9 @@ Format wpisu (zgodny z istniejącymi w `_decisions-log.md`):
 - **`_decisions-log.md` nie istnieje** → NIE twórz go po cichu. Zaproponuj utworzenie i czekaj
   (twarda reguła repo: nie tworzysz plików bez pytania). Resztę faz pokaż userowi mimo to.
 
-Po dopisaniu wpisu: zaktualizuj `updated:` w frontmatter `_decisions-log.md` na dziś.
+Wpisu nie edytujesz później — decyzja odwrócona dostaje NOWY wpis, stary zostaje jako zapis stanu
+z tamtego dnia. `updated:` w `_decisions-log.md` stampuje pre-commit; jeśli w tym vaulcie nie ma
+haka, ustaw je na dziś ręcznie.
 
 ---
 
@@ -185,7 +193,6 @@ git add _decisions-log.md
 git commit -m "$(cat <<'EOF'
 Add: decyzja [YYYY-MM-DD] — [krótki tytuł] (_decisions-log)
 
-Co-Authored-By: Klemens <noreply@example.com>
 EOF
 )"
 ```

@@ -1,9 +1,7 @@
 ---
 title: Tagging Taxonomy — Transcripts
-updated: 2026-06-12
 status: stable
-cadence: frozen
-depends-on: "[[category-routing]], [[transcript-standards]]"
+updated: 2026-06-12
 ---
 
 # Transcript Tagging Taxonomy
@@ -77,3 +75,12 @@ Convention: `person:firstname` if unique, `person:firstname-lastname` when ambig
 4. **product/client/vendor/team:** only when EXPLICITLY mentioned
 5. **Do not invent tags ad hoc** — if a new one is needed, flag it in the report and ask the user to approve adding it to this file
 6. **Do not duplicate** — if a transcript already has tags, verify and complete them (do not recreate)
+
+Tags describe the transcript. They are not entity edges: a person who has a card in the people folder is linked from the summary's `uczestnicy:`, and `person:` tags stay a search convenience on top of that.
+
+---
+
+## Related
+
+- [[category-routing]] — which folder and which modules a transcript routes to
+- [[transcript-standards]] — transcript and summary formats

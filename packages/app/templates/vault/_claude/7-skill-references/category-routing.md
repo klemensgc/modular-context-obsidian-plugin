@@ -1,9 +1,7 @@
 ---
 title: Category Routing — Transcripts → Modules
-updated: 2026-06-12
 status: stable
-cadence: frozen
-depends-on: "[[tagging-taxonomy]], [[transcript-standards]]"
+updated: 2026-06-12
 ---
 
 # Category Routing
@@ -49,5 +47,13 @@ When a transcript fits multiple categories:
 2. Open the matching project index file (`{folder}_index.md`)
 3. Read the module map from the index
 4. Identify the specific module matching the topic
-5. Read the module — check `updated:`, `sources:`, `depends-on:`
+5. Read the module — check its `## Stan`, its entity edges, and its last real change in git
 6. Assess whether the new info is relevant (not a duplicate)
+7. Weave the fact into `## Stan`; a dated entry goes in `## Log`, never inline
+
+---
+
+## Related
+
+- [[tagging-taxonomy]] — allowed tags
+- [[transcript-standards]] — transcript and summary formats

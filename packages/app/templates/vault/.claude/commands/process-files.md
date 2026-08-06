@@ -18,7 +18,7 @@ Repo jest po polsku. Odpowiadaj po polsku.
 - **Ambiguous routing** (plik pasuje do 2+ modułów) → wybierz najbardziej prawdopodobny (highest confidence), zaloguj alternatywę do `open_questions["ambiguous_routing"]`
 - **Plik binarny / nieczytelny** (PDF/docx, którego nie da się przeczytać) → spróbuj konwersji przez Bash (`pdftotext`, `textutil`), a jeśli się nie uda → zaloguj do `open_questions["unreadable_file"]` z notatką o wymaganej konwersji, NIE przerywaj
 - **Sprzeczność danych** (consistency-checker: X w module vs Y w pliku) → newest wins (plik), zachowaj starą wersję jako `<!-- PRE-MINING (data): X -->` HTML comment w module, zaloguj do `open_questions["data_conflict"]`
-- **Brakujący moduł docelowy** → stwórz stub (frontmatter + TL;DR z pliku + status: stub), zaloguj do `open_questions["new_module_stub"]` z pytaniem "rozbudować do pełnego modułu?"
+- **Brakujący moduł docelowy** → stwórz szkic (`type: modul` + `status: draft` + TL;DR z pliku), zaloguj do `open_questions["new_module_draft"]` z pytaniem "rozbudować do pełnego modułu?"
 - **Sensitive content** (tensje w zespole, finanse, equity, PII) → mininguj normalnie, dodaj sentinel `🔒 SENSITIVE` przy module w session log + zaloguj do `open_questions["sensitive_review"]`
 - **Nowy tag nieistniejący w taksonomii** → użyj z prefixem `proposed:`, zaloguj do `open_questions["taxonomy_update"]`
 - **Reweave Action = CHALLENGE** → NIE wykonuj destruktywnej zmiany, zaloguj jako blocker do `open_questions["reweave_challenge"]`
@@ -189,7 +189,7 @@ Jeśli consistency-checker znalazł SPRZECZNOŚCI:
 - **Default: newest wins** — użyj danych z pliku (zakładamy, że plik świeżo wpadł do backlogu)
 - W module zachowaj starą wersję jako HTML comment: `<!-- PRE-MINING (2026-MM-DD): X -->` tuż nad zaktualizowanym faktem
 - Zaloguj do `open_questions["data_conflict"]` z polami: module, old_value, new_value, file_source
-- **WYJĄTEK:** jeśli plik jest wyraźnie STARSZY niż moduł (np. PDF datowany sprzed `updated:` modułu, raport historyczny) → NIE nadpisuj. Zaloguj jako `historical_reference` i potraktuj plik jako kontekst, nie źródło prawdy.
+- **WYJĄTEK:** jeśli plik jest wyraźnie STARSZY niż moduł (np. PDF datowany sprzed ostatniej realnej zmiany modułu w gicie, raport historyczny) → NIE nadpisuj. Zaloguj jako `historical_reference` i potraktuj plik jako kontekst, nie źródło prawdy.
 - **NIE pytaj** — kontynuuj mining
 
 Auto-fixy (nieaktualne statusy, brakujące wiki-links) → zastosuj automatycznie w Fazie 3.
@@ -222,27 +222,33 @@ Dla każdego modułu (HIGH → MEDIUM → LOW):
 
 1. Przeczytaj moduł docelowy (CAŁY plik)
 2. Przeczytaj destylat źródłowego pliku (z Fazy 1.3) + w razie potrzeby zajrzyj ponownie do pliku
-3. Sprawdź `depends-on:` — czy powiązane pliki też wymagają zmian
-4. Edytuj moduł:
+3. Sprawdź sąsiadów — `[[wiki-linki]]` w treści i krawędzie encji we frontmatterze (`owner:`, `osoby:`, `uczestnicy:`, `dotyczy:`) — czy też wymagają zmian
+4. Sprawdź kontrakt edycji z `type:`:
+   - `modul` / `osoba` (living-state) → wplataj fakt w `## Stan`; wpis datowany wyłącznie w `## Log`
+   - `spotkanie` / `event` / `log` (write-once) → **nie edytuj**, zaloguj do `open_questions["write_once_target"]`
+5. Edytuj moduł:
    - Dodaj nowe informacje (NIE nadpisuj istniejących)
-   - Dodaj plik do `sources:` w frontmatter jako wiki-link: `[[files/nazwa]]` (lub ścieżkę do pliku źródłowego)
-   - Zaktualizuj `updated:` na dziś
-   - Zaktualizuj `status:` jeśli potrzeba
-5. Zastosuj auto-fixy z consistency-checker (wiki-links, statusy)
+   - Wstaw `[[wiki-link]]` do pliku źródłowego w treści, w miejscu gdzie fakt jest użyty. **NIE dodawaj `sources:`** — to pole żyje wyłącznie w `_transcripts/**-summary.md`
+   - Zaktualizuj `status:` jeśli potrzeba (enum: `stable | draft | needs-update | archive`)
+   - `updated:` stampuje pre-commit; jeśli w tym vaulcie nie ma haka — ustaw na dziś ręcznie, ale świeżość i tak czytaj z gita
+   - Liczby operacyjne zapisuj jako pointer: `N (stan na RRRR-MM-DD, kanon: X)`
+6. Zastosuj auto-fixy z consistency-checker (wiki-links, statusy, relikty pól `cadence:` / `depends-on:`)
 
 **Default behaviors (NIE PYTAJ — kontynuuj):**
 - **Sensitive content** (tensje, finanse, equity, PII) → mininguj normalnie. W session log oznacz moduł sentinel `🔒 SENSITIVE`. Zaloguj do `open_questions["sensitive_review"]` z listą zmienionych pól
-- **Moduł docelowy nie istnieje** → stwórz stub:
-  - Frontmatter kompletny (`title`, `updated: dziś`, `status: stub`, `cadence: tactical`, `sources: [[files/nazwa]]`)
-  - Sekcja TL;DR z kluczowymi faktami z pliku
-  - Placeholder sekcje (## Kontekst, ## Status, ## Open questions)
-  - Zaloguj do `open_questions["new_module_stub"]` z polami: path, source_file, suggested_full_module: yes/no
+- **Moduł docelowy nie istnieje** → stwórz szkic wg `_claude/2-templates/file-standard.md`:
+  - Frontmatter kompletny: `title`, `type: modul`, `status: draft`, `updated: dziś`
+  - Sekcja TL;DR z kluczowymi faktami z pliku + sekcja `## Stan`
+  - Placeholder sekcje (## Kontekst, ## Open questions)
+  - Link do pliku źródłowego w treści, nie w `sources:`
+  - Zaloguj do `open_questions["new_module_draft"]` z polami: path, source_file, suggested_full_module: yes/no
 
 ### 3.3 Safety checks
 
 Po każdej edycji weryfikuj:
-- updated: zaktualizowane?
-- sources: zawiera nowy plik?
+- `type:` obecny i poprawny? `status:` w enumie?
+- Zero pól `cadence:` / `depends-on:` / `audience:`? Zero `sources:` poza `-summary.md`?
+- Fakt trafił do `## Stan`, a data (jeśli była) do `## Log` — nie w środek akapitu?
 - Nie nadpisano nowszych danych? (szczególnie: czy plik nie jest historyczny — patrz 2.3)
 
 ### 3.4 Tracking dla Reweave
@@ -296,12 +302,12 @@ Dla każdego modułu z HIGH priority (max 8, w kolejności score descending):
    - Agent Traversal Check: "Jeśli agent podąża za linkiem, jaką decyzję podejmie?"
    - Sharpening Test: "Czy dodanie info wyostrza czy rozmywa przekaz?"
 4. **Określ Reweave Action** (1 z 5):
-   - **ADD CONNECTIONS** → dodaj wiki-links, depends-on
+   - **ADD CONNECTIONS** → dodaj wiki-links w treści i krawędzie encji we frontmatterze
    - **REWRITE CONTENT** → zaktualizuj fakty, statusy, liczby
    - **SHARPEN** → usuń hedging, potwierdź zrealizowane
    - **SPLIT** → FLAG dla usera, nie wykonuj automatycznie
    - **CHALLENGE** → STOP, pokaż sprzeczność, pytaj usera
-5. **Zastosuj** zmiany + zaktualizuj frontmatter (updated:, sources:, depends-on:)
+5. **Zastosuj** zmiany zgodnie z kontraktem edycji typu (`## Stan` / `## Log`; write-once = nie ruszaj) + krawędzie encji we frontmatterze
 6. **Zaloguj** co zrobiłeś (moduł, action, opis — do raportu w 3.5.4)
 
 Dla MEDIUM priority: zapisz do `_claude/5-backlog/reweave-queue.md` (tabela Pending; utwórz plik jeśli brak).
@@ -316,8 +322,8 @@ Dla LOW priority: zaloguj w session logu (bez akcji).
 Dla KAŻDEGO reweaved modułu:
 
 1. **Cold-Read Test** — przeczytaj tytuł i pierwszą sekcję. Czy reszta modułu jest przewidywalna z kontekstu?
-2. **Schema Check** — frontmatter kompletny? `updated:` dzisiejsze? `depends-on:` używa `[[]]`? `sources:` aktualne?
-3. **Neighbor Coherence** — przeczytaj 1 moduł z `depends-on:`. Czy nadal się zgadzają na fakty?
+2. **Schema Check** — `type:` obecny? `status:` w enumie? Zero `cadence:` / `depends-on:` / `audience:`? Krawędzie encji jako `[[]]`? Daty tylko w `## Log`?
+3. **Neighbor Coherence** — przeczytaj 1 moduł z sąsiedztwa (wiki-link albo krawędź encji). Czy nadal się zgadzają na fakty?
 
 Jeśli weryfikacja FAIL → cofnij zmiany w module, dodaj do `reweave-queue.md` z notatką "verification failed, needs human review".
 
@@ -393,7 +399,6 @@ Szukaj cross-project connections i synthesis opportunities.
    - Przeczytaj target module
    - Dodaj wiki-link inline w odpowiednim miejscu (preferuj prose, nie "See also")
    - Jeśli bidirectional → dodaj reverse link
-   - Zaktualizuj `updated:` na dziś
 2. **Synthesis Opportunities** — dla każdej wykrytej:
    - **NIE** twórz nowych modułów
    - Dodaj do `_claude/5-backlog/synthesis-opportunities.md` (sekcja Open; utwórz plik jeśli brak)
@@ -450,7 +455,7 @@ Jeśli `open_questions[]` jest pusty → pomiń tę fazę.
    - `taxonomy_update` (Faza 1)
    - `data_conflict` / `historical_reference` (Faza 2)
    - `sensitive_review` (Faza 3)
-   - `new_module_stub` (Faza 3)
+   - `new_module_draft` / `write_once_target` (Faza 3)
    - `reweave_challenge` / `split_candidates` (Faza 3.5)
    - `missing_reference` (brakujące pliki referencyjne)
 
@@ -470,8 +475,8 @@ OPEN QUESTIONS (opcjonalne — możesz pominąć)
 [N] ambiguous routing (chosen first-rank):
   • umowa-klient.pdf → clients (alternatywa: strategy)
 
-[N] new module stubs (created):
-  • _path/to/new-module.md (status: stub) — rozbudować?
+[N] new module drafts (created):
+  • _path/to/new-module.md (status: draft) — rozbudować?
 
 [N] sensitive content flagged:
   • module-x.md (zmienione: PII / liczby finansowe)
@@ -486,7 +491,7 @@ OPEN QUESTIONS (opcjonalne — możesz pominąć)
 
 ```
 Q1: Nieczytelne pliki — przenieść do files/ bez miningu / zostawić w backlogu? [multiSelect / skip]
-Q2: Stuby do rozbudowy? [lista do multiSelect / skip all]
+Q2: Szkice (`status: draft`) do rozbudowy? [lista do multiSelect / skip all]
 Q3: Reweave challenges — wykonać po zaakceptowaniu? [lista do multiSelect / skip all]
 Q4: Tagi proposed: → dodać do taksonomii? [yes all / select / skip]
 ```
@@ -497,9 +502,10 @@ Pomiń pytania których typu nie ma w `open_questions[]`.
 
 5. **Zapisz nieobsłużone open questions** do `_claude/5-backlog/post-mining-review.md` (append, datowane).
 
-### 5.5 Commit
+### 5.5 Zaproponuj commit (NIE commituj bez zgody)
 
-Automatycznie commitnij zmiany:
+Twarda reguła repo (CLAUDE.md sekcja 2: „DO NOT commit without explicit approval"). Pokaż gotową
+komendę, **nie wykonuj jej**, i zapytaj jednym zdaniem: „Commitnąć te zmiany?" — potem czekaj.
 
 ```bash
 git add [lista zmodyfikowanych plików]
@@ -507,10 +513,12 @@ git commit -m "$(cat <<'EOF'
 Add: file processing (X plików) + Y module updates + Z reweave + W reflect connections
 
 Sources: [lista plików]
-Co-Authored-By: Klemens <noreply@example.com>
 EOF
 )"
 ```
+
+Jeśli paczka jest czysto mechaniczna (sweep, rename, lint-fix — zero nowej wiedzy), dopisz w treści
+commita trailer `Meta: true`, żeby nie fałszować świeżości.
 
 ---
 

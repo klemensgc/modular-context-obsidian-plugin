@@ -1,17 +1,19 @@
 ---
 title: {{PROJECT_NAME}} — Index
+type: modul
+status: draft
 updated: 2026-06-12
-status: stub
-cadence: iron-cold
 ---
 
 # {{PROJECT_NAME}}
 
 Entry point for the **{{PROJECT_NAME}}** project. This index is the navigation hub: every module in `{{N}}_{{PROJECT_SLUG}}/` must be linked from here with a one-line description.
 
-## What this project is
+## Stan
 
 _(One paragraph: what {{PROJECT_NAME}} is, what stage it is at, why it exists. Replace this placeholder during your first working session.)_
+
+_This is the living-state section — rewrite it in place as reality changes. Dated entries belong in a `## Log` section, never here. Operational numbers are pointers: `12 (as of YYYY-MM-DD, canon: <system of record>)`._
 
 ---
 
@@ -33,7 +35,8 @@ _(Empty — modules appear here as the wiki grows. Suggested starter structure:)
 ## Conventions
 
 - Subfolders are numbered: `1-overview/`, `2-operations/`, ...
-- Every new module: kebab-case filename, full frontmatter ([[_claude/2-templates/file-standard|template]]), linked from this index
+- Every new module: kebab-case filename, frontmatter with a mandatory `type:` and a `status:` from `stable | draft | needs-update | archive` ([[_claude/2-templates/file-standard|template]]), linked from this index
+- This index is a hub: it holds the map and a short current state, not the content. When it outgrows that, the content moves into child modules
 - Links inside this index use paths relative to `{{N}}_{{PROJECT_SLUG}}/`
 
 ## Related

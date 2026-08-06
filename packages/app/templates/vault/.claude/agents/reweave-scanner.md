@@ -11,7 +11,9 @@ Respond in the repo language defined in CLAUDE.md.
 
 ## Concept
 
-Reweave (backward pass): after module M is updated, its neighbors (depends-on, wiki-links, backlinks) may become inconsistent. Central question: "If I were writing this module today, knowing what I know now — what would be different?"
+Reweave (backward pass): after module M is updated, its neighbors (wiki-links, backlinks, frontmatter entity edges `owner:` / `osoby:` / `uczestnicy:` / `dotyczy:`) may become inconsistent. Central question: "If I were writing this module today, knowing what I know now — what would be different?"
+
+Freshness is read from git, never from frontmatter: a file's last real change is the last commit touching it, **skipping commits carrying the `Meta: true` trailer** (mechanical batches — sweeps, renames, lint fixes — do not refresh knowledge). `updated:` is a stamp, not a signal — a pre-commit hook writes it once someone installs one, and the scaffold ships none, so it may be stale or hand-edited. Never compute with it. `cadence:`, `depends-on:`, `audience:` do not exist in this contract; `sources:` lives only in `_transcripts/**-summary.md`.
 
 ## Input (provided in the prompt)
 
@@ -26,17 +28,19 @@ Evaluate the 5 triggers in this order:
 ### Step 1: Trigger 1 — Post-Pipeline Cascade
 
 For EVERY module in touched_modules:
-1. Read the module → extract `depends-on:` from frontmatter
+1. Read the module → extract entity edges from frontmatter (`owner:`, `osoby:`, `uczestnicy:`, `dotyczy:`)
 2. Read the content → extract `[[wiki-links]]`
 3. Grep the vault for `[[module-name]]` → find backlinks
-4. UNION the neighbors → filter out: already in touched_modules, `updated:` today, anything in `_transcripts/`, `_claude/`, `_workspace/`, `_assets/`
+4. UNION the neighbors → filter out: already in touched_modules, anything already edited in this session, anything in `_transcripts/`, `_claude/`, `_workspace/`, `_assets/`, anything with `status: archive`
 5. For each remaining neighbor → read it, assess whether the new info in the touched module makes it outdated
 6. Determine the reweave action (Add Connections / Rewrite Content / Sharpen / Split / Challenge)
 
 ### Step 2: Trigger 2 — Staleness + Connectivity
 
 Limit to modules identified during module scanning (if provided in the prompt):
-- `staleness_ratio` > 1.0 AND incoming links >= 3 (ratio = days_since_update / cadence_days; hot=7d, tactical=30d, iron-cold=60d)
+- `staleness_ratio` > 1.0 AND incoming links >= 3
+
+**Use the ratios the scanning phase handed you.** Your tools are read-only (Read, Grep, Glob) — you cannot run git, so you cannot derive a ratio yourself. Do not substitute `updated:` for it and do not invent one: a module with no supplied ratio is simply not a candidate for this trigger. For reference, the budgets the caller computes against (days since the last non-`Meta` commit ÷ budget) are: **hub 7d** (see *Hub files* below — beats the type budget), `modul` 60d, `osoba` 180d, `deal` 30d (only inside `_sales/pipeline/active/`), no resolvable type 60d. Anything outside staleness is out of scope — `status: archive`, the write-once types (`spotkanie`, `event`, `log`), and the trees `_claude/`, `.claude/`, `_transcripts/`, `_transcripts-backlog/`, `_workspace/`. Do not re-add them.
 
 ### Step 3: Trigger 3 — Contradiction Cascade
 
@@ -46,12 +50,12 @@ For each resolved contradiction:
 ### Step 4: Trigger 4 — Index Drift
 
 For each updated index:
-- Extract its linked modules → compute each module's staleness_ratio (= days_since_update / cadence_days) → if ratio > 1.0 → candidate
+- Extract its linked modules → use each module's `staleness_ratio` as supplied by the scanning phase → if ratio > 1.0 → candidate. A module with no supplied ratio is skipped here, not estimated
 
 ### Step 5: Trigger 5 — Transcript Volume
 
 For modules from the scanning phase:
-- Count transcripts in `sources:` newer than `updated:` → if >= 3 → candidate
+- Search `_transcripts/**-summary.md` (the only place `sources:` exists) for summaries pointing at the module → count those dated after the module's last real change (git) → if >= 3 → candidate
 
 ## Priority Scoring
 
@@ -64,7 +68,7 @@ For EVERY candidate compute a score (0-100):
 | Staleness ratio | 25% | ratio > 2.0=25, 1.0-2.0=15, 0.5-1.0=8, <0.5=0 |
 | Hub file | 20% | yes=20, no=0 |
 
-Hub files: modules listed under "Key files" in CLAUDE.md, project index files, and any module with 5+ incoming links.
+Hub files, for this scoring factor: `_decisions-log.md`, every project index (`{N}_{project}/{N}_{project}_index.md`), and any module with 5+ incoming links. Only the first two carry the 7-day staleness budget — the third is a connectivity signal used for scoring only. The index files of the excluded trees (`_transcripts/transcripts_index.md`, `_workspace/_workspace_index.md`) are not hubs; those trees sit outside staleness entirely.
 
 ## Deduplication
 
@@ -82,7 +86,7 @@ If a module appears via multiple triggers → keep the HIGHEST score, note all t
 - **Reason:** [specific description of what became outdated]
 - **Reweave action:** [REWRITE CONTENT / ADD CONNECTIONS / SHARPEN / SPLIT / CHALLENGE]
 - **Incoming links:** X
-- **Staleness:** ratio X.XX (X days, cadence: Y)
+- **Staleness:** ratio X.XX (X days since last non-`Meta` commit, budget: Y days)
 - **Hub:** yes/no
 
 #### 2. ...
@@ -117,6 +121,7 @@ If a module appears via multiple triggers → keep the HIGHEST score, note all t
 - **Do NOT edit files** — only read and report
 - **ALWAYS** read a module BEFORE assessing it (never judge by filename)
 - **SKIP** folders: `_transcripts/`, `_claude/`, `_workspace/`, `_assets/`, `.claude/`
-- If a module has `status: stub` → do not propose a reweave, flag it as a GAP
+- If a module has `status: draft` (or the legacy value `status: stub`, which is outside the 2.0 enum `stable | draft | needs-update | archive`) → do not propose a reweave, flag it as a GAP
+- If a module has `status: archive` → skip entirely, archives are outside staleness
 - **MAX 20** HIGH+MEDIUM candidates total (performance guardrail)
 - If HIGH > 8 → keep the top 8 by score, demote the rest to MEDIUM

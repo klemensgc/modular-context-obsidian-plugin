@@ -244,10 +244,11 @@ AskUserQuestion (max 4, multiSelect dla flag), zastosuj decyzje lub skip, a nieo
 Jeden wspólny log w `_claude/4-sessions/{YYYY-MM}/` (szablon `_claude/2-templates/session-log.md` jeśli jest).
 Uwzględnij OBA źródła (transkrypty + pliki), focus comments i odpowiedzi.
 
-### 10.2 Commit (RAZ — nie podwójnie)
+### 10.2 Zaproponuj commit (RAZ — nie podwójnie, i NIE bez zgody)
 
-Jeśli --dry-run → NIE commituj (pokaż tylko co by zaszło). W przeciwnym razie jeden commit obejmujący
-zmiany z obu pipeline'ów:
+Twarda reguła repo (CLAUDE.md sekcja 2: „DO NOT commit without explicit approval"). Pokaż gotową
+komendę i czekaj na „tak" — również poza `--dry-run`. Jeden commit obejmujący zmiany z obu
+pipeline'ów, nigdy dwa:
 
 ```bash
 git add [lista WSZYSTKICH zmodyfikowanych plików — transkrypty + pliki + moduły + indexy + logi]
@@ -255,7 +256,6 @@ git commit -m "$(cat <<'EOF'
 Add: synthesise backlog (A transkryptów + B plików) + X module updates + reweave + reflect
 
 Sources: [lista transkryptów i plików]
-Co-Authored-By: Klemens <noreply@example.com>
 EOF
 )"
 ```

@@ -1,14 +1,18 @@
 ---
 title: Transcript Standards — Formats and Conventions
-updated: 2026-06-12
 status: stable
-cadence: frozen
-depends-on: "[[tagging-taxonomy]], [[category-routing]]"
+updated: 2026-06-12
 ---
 
 # Transcript Standards
 
 Transcripts are the RAW SOURCES layer: immutable input. The LLM reads them, never modifies their content. Only frontmatter/tags may be added during processing.
+
+A transcript and its summary are `type: spotkanie` — **write-once**. You do not revise them later; corrections happen in the modules the transcript fed, not in the record of what was said. `sources:` lives here and only here: in the `-summary.md` file.
+
+**Participants:** `uczestnicy:` is a typed edge — every value must be a wiki-link resolving to a card in the people folder. A speaker who has no card yet goes into `uczestnicy-nierozpoznani:` as plain text, and moves to `uczestnicy:` the day their card is created. Never point `uczestnicy:` at a name that has no file.
+
+In a freshly scaffolded vault there is no people folder, so **every** speaker lands in `uczestnicy-nierozpoznani:` — that is what the sample transcript in `_transcripts-backlog/` shows, and it is the correct starting state, not a bug. The typed graph starts working the moment you create the first card. Practical rule: after an ingest, whoever appears in a third transcript gets a card, and their name moves from the unresolved field to `uczestnicy:` in every summary that mentions them. The transcript itself is write-once — resolve names in the `-summary.md`, never by rewriting the record.
 
 ## Two coexisting formats
 
@@ -17,9 +21,11 @@ Transcripts are the RAW SOURCES layer: immutable input. The LLM reads them, neve
 ```yaml
 ---
 title: "Conversation title"
+type: spotkanie
+status: stable
 category: meetings
 date: 2026-06-10
-type: transcript
+uczestnicy: "[[osoby/alex-doe]], [[osoby/sam-roe]]"
 tags:
   - action:planning
   - person:alex
@@ -48,8 +54,18 @@ During processing: VERIFY existing tags, COMPLETE missing ones (never delete).
 **null** (0:15): Content (speaker not recognized).
 ```
 
-**Summary:**
+**Summary:** the summary always gets frontmatter, even when the transcript has none —
+
 ```markdown
+---
+title: "Conversation title — Summary"
+type: spotkanie
+status: stable
+updated: 2026-06-10
+sources: "[[_transcripts/meetings/conversation-title]]"
+uczestnicy: "[[osoby/alex-doe]], [[osoby/sam-roe]]"
+---
+
 # Conversation title - Summary
 
 **Date:** 2026-06-10
@@ -99,3 +115,10 @@ Before categorizing, check:
 2. Is it a pair? (look for the `-summary.md` file)
 3. Is it a duplicate? (check `_transcripts/`)
 4. Which format? (A with YAML or B without)
+
+---
+
+## Related
+
+- [[category-routing]] — which folder and which modules a transcript routes to
+- [[tagging-taxonomy]] — allowed tags

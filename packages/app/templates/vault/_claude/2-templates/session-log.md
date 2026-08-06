@@ -1,13 +1,12 @@
 ---
 title: Template — Session Log
-updated: 2026-06-12
 status: stable
-cadence: frozen
+updated: 2026-06-12
 ---
 
 # Template: Session Log
 
-A session log is the chronological record of what happened in a working session — the vault's "log file".
+A session log is the chronological record of what happened in a working session — the vault's "log file". It is `type: log`: **write-once**. You write it at the end of the session and never edit it afterwards; the next session gets its own file. Logs carry no staleness budget.
 
 ## Naming convention
 
@@ -24,9 +23,9 @@ Save in: `_claude/4-sessions/YYYY-MM/`
 ```markdown
 ---
 title: Session - [YYYY-MM-DD HH:MM]
+type: log
+status: stable
 updated: [YYYY-MM-DD]
-status: archive
-cadence: frozen
 files-modified: [count]
 ---
 

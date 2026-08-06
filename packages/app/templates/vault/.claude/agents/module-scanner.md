@@ -24,7 +24,7 @@ You will be given one of two strategies. Execute it exactly.
 1. For each transcript category → open the matching project index file (`{folder}_index.md`)
 2. Read the module map from the index
 3. Identify the specific files matching the transcript topics
-4. Follow `depends-on:` in frontmatter (max 2 levels deep)
+4. Follow the graph one hop out: `[[wiki-links]]` in the body and the entity edges in frontmatter (`owner:`, `osoby:`, `uczestnicy:`, `dotyczy:`), max 2 levels deep
 
 ### Strategy: Entity-based
 
@@ -37,10 +37,11 @@ You will be given one of two strategies. Execute it exactly.
 For each candidate module you MUST:
 
 1. **Read the file** (never judge by filename!)
-2. Check `updated:` — is it older than the transcript date?
-3. Check `sources:` — is the transcript already listed? (→ SKIP)
-4. Check `status:` — draft/needs-update = higher priority
-5. Assess whether the new info is RELEVANT (not a duplicate)
+2. Check its last real change in git (the last commit without the `Meta: true` trailer) — is it older than the transcript date? Do not read `updated:` for this; it is a stamp
+3. Check whether the transcript already fed this module — grep `_transcripts/**-summary.md` for a summary whose `sources:` covers it and which already links here (→ SKIP)
+4. Check `status:` — `draft` / `needs-update` = higher priority; `archive` = skip entirely
+5. Check `type:` — write-once entities (`spotkanie`, `event`, `log`) are never update candidates
+6. Assess whether the new info is RELEVANT (not a duplicate)
 
 ## Prioritization
 
@@ -59,11 +60,12 @@ For each candidate module you MUST:
 ### HIGH priority
 
 #### `1_project/subfolder/module.md`
-- **Status:** stable | updated: YYYY-MM-DD
+- **Type / status:** modul | stable
+- **Last real change:** YYYY-MM-DD (git, non-`Meta` commit)
 - **Reason:** new fact X with status Y (from transcript Z)
-- **What to add:** [specific information]
+- **What to add:** [specific information, and which section — `## Stan` or `## Log`]
 - **Source transcripts:** [name.md]
-- **depends-on checked:** [[file1]] — OK, [[file2]] — also needs update
+- **Neighbors checked:** [[file1]] — OK, [[file2]] — also needs update
 
 ### MEDIUM priority
 [...]
@@ -73,7 +75,7 @@ For each candidate module you MUST:
 
 ## Checked but OK (no changes needed)
 - `file.md` — info already present
-- `file2.md` — updated more recently than the transcript
+- `file2.md` — last real change is newer than the transcript
 ```
 
 ## Important

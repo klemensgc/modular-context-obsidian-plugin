@@ -1,9 +1,7 @@
 ---
 title: Transcripts Index
-updated: 2026-06-12
 status: stable
-cadence: tactical
-depends-on: "[[../_claude/7-skill-references/category-routing]], [[../_claude/7-skill-references/transcript-standards]]"
+updated: 2026-06-12
 ---
 
 # Transcripts Index
