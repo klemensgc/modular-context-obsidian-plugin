@@ -3612,7 +3612,7 @@ class OnboardingModal extends Modal {
       "Create project folders with index files as entry points",
       "Add _transcripts/ for raw material and _culture/ for your principles",
       "Define skills in .claude/skills/ to automate recurring workflows",
-      "Use frontmatter (status, updated, depends-on) to keep everything alive",
+      "Use frontmatter (type, status) — freshness is read from git history, not from a date you type by hand",
     ];
     const vaultList = container.createEl("ol", { cls: "mc-onboarding-vault-list" });
     for (const step of vaultSteps) {
@@ -4206,6 +4206,8 @@ const SKILLS: SkillDef[] = [
   { id: "clickup-review", label: "ClickUp Review", description: "Review a CRM/sales-funnel list in ClickUp — stages, deals near close, stale leads, value sums", stars: 4, difficulty: "operator", value: "high", scope: "universal", requires: ["clickup-connected", "python3", "review-core"], category: "analyze" },
   { id: "comms-review", label: "Comms Review", description: "Cross-channel owner overview — ClickUp + WhatsApp + Gmail in one report", stars: 5, difficulty: "expert", value: "high", scope: "universal", requires: ["clickup-connected", "whatsapp-macos", "gsuite-connected", "python3", "review-core"], category: "analyze" },
   { id: "review-core", label: "Review Core (lib)", description: "Shared ClickUp client + normalized model for the *-review family. Internal dependency.", stars: 3, difficulty: "expert", value: "medium", scope: "universal", requires: ["clickup-connected", "python3"], category: "automate" },
+  // Orchestration — deterministic multi-agent graphs (replaces the loop-based trio)
+  { id: "workflow-design", label: "Workflow Design", description: "Interactive designer for multi-agent workflows — topology pick, per-stage casting, adversarial gates, runnable script", primary: true, stars: 5, difficulty: "operator", value: "high", scope: "universal", requires: ["python3"], category: "automate" },
 ];
 
 // Setup-flag evaluation + prereq checks now live in @mc/shared (skills/setup-flags):

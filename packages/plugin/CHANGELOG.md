@@ -1,5 +1,78 @@
 # Changelog
 
+## v2.4.0 — 2026-08-06 — Methodology 2.0: typed entities + schema-as-code
+
+The methodology the plugin teaches moves from "notes with conventions" to "a graph of typed entities under an enforced contract". A note has no type; an entity does.
+
+### Changed
+- **Onboarding prompt rewritten to methodology 2.0** (`packages/shared/src/skills/onboarding-prompt.ts`) — same export surface (`buildOnboardingPrompt`, `OnboardingMission`, literal `\n` join for TUI safety), new content:
+  - Three layers stay (Sources → Wiki → Schema, credit: Andrej Karpathy, "LLM Wiki"). The Wiki layer is now defined as a **graph of typed entities**, the Schema layer as **executable code**.
+  - **Six types in three families** — knowledge (`modul`, `deal`), people (`osoba`), record of time (`spotkanie`, `event`, `log`) — resolved by the MECE cascade `log? → spotkanie? → event? → osoba? → deal? → modul`, first match wins, `type:` mandatory.
+  - **Two edit contracts**: living-state (state section + dated log, facts woven in place) vs write-once (never edited after writing), with the one-sentence routing test — *will anyone edit this after the action ends?* `deal` is the one type that crosses over: living-state while open, write-once once won or lost.
+  - **The transcript is write-once**: whatever frontmatter it arrived with stays; a half-recognized name or a claim worth checking is resolved in the paired `-summary.md`, never by editing the record. Replaces the old absolute ("raw transcripts carry no frontmatter at all"), which contradicted the sample transcript the scaffold ships and demos on.
+  - **Schema-as-code**: the write contract is enforced by `PostToolUse → pre-commit → CI`, FAIL blocks rather than warns. Claim deliberately scoped to the schema lint, not to "all rules".
+  - **Freshness from git**: `updated:` is stamped by the pre-commit hook, staleness is computed from commit history per type (hub 7d / `modul` 60d / `osoba` 180d / active `deal` 30d), commits carrying the `Meta: true` trailer are skipped.
+  - **Numbers are pointers**: `N (as of YYYY-MM-DD, canon: SYSTEM)` — the canonical system can be a CRM, a spreadsheet or any named source; snapshots are banned.
+  - **Workflows, not loops**: deterministic multi-agent graphs keep intermediate results out of the root context window.
+  - **Prompt thins, contract thickens**: cut procedure, keep boundaries and definitions of done; verification moves into scripted gates.
+  - Both missions (`scan`, `scaffolded`) rewritten as contracts — diagnosis and definition of done instead of enumerated steps — and both close on the same commitment: enforce the schema with a hook, not with a reminder in a prompt.
+- **Onboarding "Build your own vault" copy** (`main.ts`) — "Use frontmatter (status, updated, depends-on)" → **"Use frontmatter (type, status) — freshness is read from git history, not from a date you type by hand"**. `cadence:`, `depends-on:` and `audience:` no longer exist in the contract. The panel deliberately does not promise automatic `updated:` stamping: this is the hand-built path, and nothing installs a hook on it.
+- **Starter vault template** (`packages/app/templates/`) migrated to the 2.0 contract — typed frontmatter, entity edges (`owner:` / `osoby:` / `uczestnicy:` / `dotyczy:`) replacing `depends-on:`, git-derived staleness in the bundled agents instead of hand-computed cadence ratios.
+- **Project index generator** (`packages/app/templates/project-index.md`) migrated too — it had been missed, and it produces every `{N}_{slug}_index.md` in a scaffolded vault. `type: modul` added, `status: stub` → `status: draft` (the 2.0 enum), `cadence: iron-cold` dropped, and the body's `## What this project is` renamed to `## Stan` so the generated hub actually has the living-state section every bundled agent writes into. Before this, a fresh scaffold shipped hubs that the bundled `consistency-checker` would flag against the contract the same scaffold had just taught.
+
+### Added
+- **`workflow-design` in the hardcoded `SKILLS` fallback** — the offline/registry-unreachable list now matches the registry (primary, ★5, operator, requires `python3`, category `automate`). Multi-agent orchestration is a designed deterministic graph, not a loop.
+
+### Skills repo changes (separate repo — `klemensgc/modular-context-skills`)
+- Registry **2.2.0** — **24 skills** (schema v2).
+- `workflow-design` added (core, `automate`) — topology pick, per-stage casting, adversarial gates, validated runnable script.
+- **`ralph-prompt`, `ralph-factory`, `overnight` archived** (`archivedAt: 2026-08-06`) — superseded by native Claude Code workflow orchestration; they live in the registry's `archived` list, not in the installable set.
+
+### Removed (from the taught methodology, not from user vaults)
+- Hand-maintained `updated:` — pre-commit stamps it, git holds the truth.
+- `cadence:`, `depends-on:`, `audience:` — replaced by typed edges plus git-derived staleness. `sources:` survives in exactly one place: `-summary.md` files paired with a transcript.
+- Trailing `(date: …)` appendices and `## Change History` sections — replaced by the two edit contracts.
+
+### Desktop app (experimental, `packages/app`)
+- Desktop app 2.3.0 work landed after the plugin 2.3.0 tag: onboarding flow, graph view, home screen, CodeMirror 6 editor, and a DMG release workflow.
+
+### Breaking changes
+None for the plugin API. Vaults built under the 1.x conventions keep working; the onboarding agent now offers to migrate them rather than assuming them.
+
+## v2.3.0 — 2026-07-18 — Claude Code harness integration: Waiting terminals + Workflows
+
+The sidebar reads Claude Code's own session state (status registry, multi-agent workflow journals) instead of guessing from terminal output.
+
+### Added
+- **Waiting section** — an amber section surfacing every terminal where Claude is blocked on the user (permission prompt or question) the moment it happens. Click a card to jump to that terminal.
+- **Workflows section** — live multi-agent workflow runs in the vault with real-time progress (finished / spawned, e.g. `7/12`). Clicking a run focuses its terminal. Stale runs age out; the section hides when empty.
+- **Optional deep-integration hooks** (Settings → Deep integration hooks, off by default) — instant state transitions via Claude Code's Stop/Notification hooks.
+
+### Changed
+- **Agent state is read, not inferred** — Working / To Review transitions driven by Claude Code session status (busy / idle / waiting). Output heuristics remain as fallback for Codex and older CLIs.
+- **Deterministic session binding** — fresh launches pre-assign the Claude session id, so restore and status tracking no longer depend on transcript-file guessing.
+- **Auto-names** — terminal cards adopt task-derived session names from the CLI. Manually set names are never overwritten.
+- **CI** — Build Check builds only shipped packages (experimental `packages/app` excluded).
+
+### Requirements
+- Claude Code CLI 2.1.x+ for the new state features. Everything degrades gracefully on older versions.
+
+## v2.2.0 — 2026-07-07 — Terminal fit fix + Session Restore v2
+
+### Fixed
+- **Terminals no longer clipped at the bottom** — FitAddon was measuring panel height including the 24px session title bar, so the last row (Claude Code's status bar) was always cut off. xterm now lives in a dedicated `.mc-terminal-body` wrapper; horizontal padding moved onto `.xterm`, so the column count is exact too.
+- **`cwd` actually restored** — it was being persisted but ignored on restore.
+
+### Added
+- **Snapshots every 30s** — session state survives a crash or force-quit of Obsidian (previously written only on graceful close).
+- **Layout restore** — split mode, pane assignment and focus are persisted across restarts.
+- **Auto-resume Claude Code** — the plugin binds a Claude session UUID to each terminal (by watching transcript files under `~/.claude/projects/`). After a restart the restored terminal runs `claude -r <id>` itself, so you return to the same conversation instead of a dead tail.
+- **`MC_TERM_CMD`** — optional PTY helper mode that execs a command through the login shell without a visible prompt.
+
+### Fixed (build)
+- `packages/shared/src/skills/` brought into the repo (untracked since a refactor) — fixes builds from a clean checkout.
+- Release CI builds only `shared` + `mcp-google` + `plugin`; the experimental `packages/app` no longer blocks releases.
+
 ## v2.1.0 — 2026-04-18 — Library UX: categories + ratings + prereqs
 
 Skills repo graduated from flat registry to curated library. Plugin now parses library metadata (stars, difficulty, scope, requires) and evaluates prereqs before skill install.
