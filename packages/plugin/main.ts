@@ -51,6 +51,54 @@ const VIEW_TYPE = "mc-terminal-view";
 let ptyHelperPath = "";
 // PTY helper Python source now imported from @mc/shared (bundled via esbuild .py text loader).
 
+// --- Render self-heal ---
+// A GPU process restart (macOS sleep/wake, driver hiccup) drops every WebGL
+// context AND wipes xterm's glyph atlas pages — GPU-backed 2D canvases shared
+// by all terminals with the same font config. xterm restores the GL context on
+// its own (onContextLoss never fires) but re-uploads the blank atlas: cursor and
+// cell backgrounds render, text does not, in old AND newly opened terminals
+// (incident 15.10.2026). Fix: after any context event, clear the shared atlas
+// and redraw ALL terminals in one pass — clearing per terminal at different
+// moments would wipe glyphs the other terminals have already re-rasterized.
+let renderLogPath = "";
+const liveSessions = new Set<TerminalSession>();
+let repaintTimer: number | null = null;
+
+/** Append one line to <plugin dir>/render-events.log (rotates at 256 KB).
+ *  DevTools console dies with the plugin; this trace survives a restart. */
+function renderLog(event: string, detail = "") {
+  const line = `${new Date().toISOString()} ${event}${detail ? " " + detail : ""}`;
+  console.info("[mc-render]", line);
+  if (!renderLogPath) return;
+  try {
+    const fs = require("fs");
+    try {
+      if (fs.statSync(renderLogPath).size > 256 * 1024) fs.renameSync(renderLogPath, renderLogPath + ".1");
+    } catch {}
+    fs.appendFileSync(renderLogPath, line + "\n");
+  } catch {}
+}
+
+/** Clear the shared glyph atlas and redraw every live terminal in one pass. */
+function repaintAllTerminals(reason: string): number {
+  let n = 0;
+  for (const s of liveSessions) {
+    if (s.destroyed) continue;
+    try { s.terminal.clearTextureAtlas(); n++; } catch {}
+  }
+  renderLog("repaint-all", `reason=${reason} sessions=${n}`);
+  return n;
+}
+
+/** Debounced repaint — a GPU restart fires one event per terminal. */
+function scheduleRepaintAll(reason: string, delayMs = 300) {
+  if (repaintTimer !== null) window.clearTimeout(repaintTimer);
+  repaintTimer = window.setTimeout(() => {
+    repaintTimer = null;
+    repaintAllTerminals(reason);
+  }, delayMs);
+}
+
 // --- Theme helpers ---
 // Build an xterm.js ITheme from Obsidian's CSS variables at runtime.
 // ANSI colors use sensible defaults that adapt to light/dark mode.
@@ -665,15 +713,30 @@ class TerminalSession {
     this.terminal.open(this.bodyEl);
 
     // WebGL renderer — eliminates DOM-renderer scroll artefacts (residual chars,
-    // colour bleed). Falls back silently to default DOM renderer if WebGL2 is
-    // unavailable or the GPU context is lost.
+    // colour bleed). Falls back to the DOM renderer if WebGL2 is unavailable or
+    // the GPU context is lost for good. Context events fire on xterm's own
+    // canvas; capture listeners on bodyEl see them without touching xterm
+    // internals. See "Render self-heal" at the top of the file.
+    this.bodyEl.addEventListener("webglcontextlost", () => {
+      renderLog("webgl-context-lost", `session=${this.id}`);
+    }, true);
+    this.bodyEl.addEventListener("webglcontextrestored", () => {
+      // Runs before xterm's own restore handler — the debounce lets it finish.
+      renderLog("webgl-context-restored", `session=${this.id}`);
+      scheduleRepaintAll("context-restored");
+    }, true);
     try {
       const webgl = new WebglAddon();
-      webgl.onContextLoss(() => webgl.dispose());
+      webgl.onContextLoss(() => {
+        renderLog("webgl-fallback-dom", `session=${this.id}`);
+        webgl.dispose();
+        scheduleRepaintAll("fallback-dom");
+      });
       this.terminal.loadAddon(webgl);
     } catch (e) {
-      console.warn("[modular-context] WebGL renderer unavailable, falling back to DOM:", e);
+      renderLog("webgl-unavailable", `session=${this.id} ${String(e)}`);
     }
+    liveSessions.add(this);
 
     // Grab the hidden textarea xterm.js creates for input
     this.textareaEl = this.containerEl.querySelector(".xterm-helper-textarea");
@@ -1125,6 +1188,7 @@ class TerminalSession {
   destroy() {
     // Mark destroyed FIRST so any callback that slips through bails out
     this.destroyed = true;
+    liveSessions.delete(this);
 
     // Detach all process listeners BEFORE kill+dispose. process.kill() is
     // async — without this, the exit/data events fire after terminal.dispose()
@@ -4455,6 +4519,8 @@ export default class TerminalPlugin extends Plugin {
       console.error("[modular-context] Failed to write pty-helper.py:", e);
       new Notice("Modular Context: Failed to write terminal helper. Check console.");
     }
+    renderLogPath = path.join(vaultBase, this.manifest.dir, "render-events.log");
+    renderLog("plugin-load", `v${this.manifest.version}`);
 
     // Skill registry — fetches and installs skills from GitHub
     this.skillRegistry = new SkillRegistry(this.app, this);
@@ -4543,6 +4609,16 @@ export default class TerminalPlugin extends Plugin {
           const view = leaves[0].view as TerminalView;
           view.fullscreenManager?.toggle();
         }
+      },
+    });
+
+    // Manual escape hatch for blank terminals — no restart, PTYs keep running.
+    this.addCommand({
+      id: "repaint-terminals",
+      name: "Terminal: Repaint All (fix blank text)",
+      callback: () => {
+        const n = repaintAllTerminals("command");
+        new Notice(`Modular Context: repainted ${n} terminal(s)`);
       },
     });
 

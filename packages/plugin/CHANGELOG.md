@@ -1,5 +1,19 @@
 # Changelog
 
+## v2.4.1 — 2026-10-15 — Fix: blank terminals after a GPU process restart
+
+Symptom: every terminal pane — including newly opened ones — showed only the cursor and cell backgrounds, no text. PTYs and Claude sessions kept running; only a plugin restart brought the text back (and killed every session).
+
+### Fixed
+- **Glyph atlas wiped by a GPU process restart** (`main.ts`). xterm's WebGL renderer rasterizes glyphs into atlas pages that are GPU-backed 2D canvases, shared by every terminal with the same font config. When the GPU process restarts (macOS sleep/wake, driver hiccup) the pages lose their content; xterm restores the WebGL context on its own — `onContextLoss` never fires — and re-uploads the blank atlas. The plugin now listens for `webglcontextlost` / `webglcontextrestored` on each terminal and, after any context event, repaints **all** terminals in one debounced pass (`terminal.clearTextureAtlas()`). One pass matters: clearing the shared atlas per terminal at different moments would wipe glyphs the other terminals had already re-rasterized.
+- **WebGL → DOM fallback crashed** (`package.json`). `@xterm/addon-webgl` 0.19.0 belongs to the xterm 6 line; paired with `@xterm/xterm` 5.5.0 its `dispose()` throws (`_core._store` is undefined in 5.5), so a context that never came back left the terminal with no renderer at all. Pinned to `^0.18.0` — the release built for xterm 5.5 (peer `^5.0.0`).
+
+### Added
+- **Command "Terminal: Repaint All (fix blank text)"** — manual repaint of every terminal, no restart, PTYs untouched.
+- **`render-events.log`** in the plugin folder — one line per renderer event (plugin load, context lost/restored, DOM fallback, repaint), rotated at 256 KB. The DevTools console dies with the plugin; this trace survives a restart.
+
+Verified in headless Chrome against xterm 5.5.0: wiping the atlas pages and losing/restoring the WebGL context reproduces the blank panes in both terminals without the fix and restores the text with it; the no-restore path falls back to the DOM renderer cleanly on 0.18.0 and throws on 0.19.0.
+
 ## v2.4.0 — 2026-08-06 — Methodology 2.0: typed entities + schema-as-code
 
 The methodology the plugin teaches moves from "notes with conventions" to "a graph of typed entities under an enforced contract". A note has no type; an entity does.
